@@ -1773,6 +1773,21 @@
     { secs: 150, pay: 30, time: 60 }
   ];
   const BOSS_GAP = [60000, 120000];   // Pause zwischen zwei Bossen in ms (1 bis 2 min, nach der Uhr)
+  // Extra seltener Bonus-Boss: muss nicht besiegt werden. Er bleibt 30 s, und jeder Klick gibt Kippen
+  // wie bei einem Besucher (click, verdoppelt sich mit jedem Prestige). chance = Anteil der Boss-Auftritte.
+  const HELMUT = { name: 'Helmut Schmidt', chance: 0.05, time: 30, click: 10000, color: '#c8d0e8', art: bossArt(String.raw`
+       _________
+     _/_________\__
+    (______________)
+      /  _   _  \
+     |  (o)-(o)  |
+     |     >     |
+     |   \___/   |=====*
+      \_________/      ~
+    ___/|     |\___     ~
+   /    | MEN |    \
+  |     | THOL|     |
+  |_____|_____|_____|`) };
   const bossEl = document.getElementById('boss');
   const bossNameEl = document.getElementById('bossname');
   const bossFillEl = document.getElementById('bosshpfill');
@@ -1784,15 +1799,19 @@
   const bossClick = () => perCig() * (1 + 0.5 * owned.bier) + 0.25 * income();
 
   function startBoss(now) {
-    const i = bossWins % BOSSES.length, b = BOSSES[i], sc = BOSS_SCALE[i], inc = income();
+    const gift = Math.random() < HELMUT.chance;
+    const i = bossWins % BOSSES.length, b = gift ? HELMUT : BOSSES[i], sc = BOSS_SCALE[i], inc = income();
     const hp = b.hp + inc * sc.secs;
-    boss = { b, hp, max: hp, reward: b.reward + inc * sc.pay, end: now + sc.time * 1000 };
+    boss = gift
+      ? { b, gift: true, earned: 0, start: now, end: now + HELMUT.time * 1000 }
+      : { b, hp, max: hp, reward: b.reward + inc * sc.pay, end: now + sc.time * 1000 };
     bossLast = now;
     bossEl.style.color = b.color;
-    bossNameEl.textContent = `BOSS: ${b.name}`;
+    bossNameEl.textContent = gift ? `★ ${b.name} ★` : `BOSS: ${b.name}`;
     bossArtEl.textContent = b.art.join('\n');
     packEl.hidden = true; bossEl.hidden = false;
-    setStatus(`BOSSKAMPF: ${b.name}! Klick ihn weg!`, 3000);
+    setStatus(gift ? `${b.name} schaut vorbei! ${HELMUT.time} s lang gibt jeder Klick Kippen!`
+      : `BOSSKAMPF: ${b.name}! Klick ihn weg!`, 3000);
     renderBoss();
   }
 
@@ -1802,7 +1821,19 @@
     bossEl.hidden = true; packEl.hidden = false;
   }
 
+  const giftClick = () => HELMUT.click * Math.pow(2, prestige);
+
   function renderBoss() {
+    if (boss.gift) {
+      // kein Leben: der Balken zeigt die verbleibende Zeit
+      const now = performance.now(), left = Math.max(0, (boss.end - now) / (boss.end - boss.start));
+      bossFillEl.style.width = `${(left * 100).toFixed(1)}%`;
+      bossFillEl.style.background = '#ffd24a';
+      setText(bossInfoEl, `noch ${Math.max(0, Math.ceil((boss.end - now) / 1000))} s · nicht besiegen, nur klicken!`
+        + `\n+${fmt(giftClick())} Kippen pro Klick` + (prestige ? ` (x${fmt(Math.pow(2, prestige))} Prestige)` : '')
+        + `\nbisher: ${fmt(boss.earned)} Kippen`);
+      return;
+    }
     const frac = Math.max(0, boss.hp / boss.max);
     bossFillEl.style.width = `${(frac * 100).toFixed(1)}%`;
     bossFillEl.style.background = frac > 0.5 ? '#5fd05f' : frac > 0.25 ? '#ffd24a' : '#e0483a';
@@ -1835,9 +1866,10 @@
     // automatischer Angriff der Helfer
     const dt = Math.min(2, (now - bossLast) / 1000);
     bossLast = now;
-    if (damageBoss(income() * dt)) return;
+    if (!boss.gift && damageBoss(income() * dt)) return;
     if (now >= boss.end) {
-      setStatus(`${boss.b.name} ist entkommen! Kein Bonus, dein Einkommen läuft normal weiter.`, 3500);
+      if (boss.gift) save();
+      setStatus(boss.gift ? `${boss.b.name} zieht weiter. Insgesamt +${fmt(boss.earned)} Kippen.` :`${boss.b.name} ist entkommen! Kein Bonus, dein Einkommen läuft normal weiter.`, 3500);
       endBoss();
       return;
     }
@@ -1848,6 +1880,13 @@
     if (!boss) return;
     bossEl.classList.add('hit');
     setTimeout(() => bossEl.classList.remove('hit'), 80);
+    if (boss.gift) {
+      const bonus = giftClick();
+      boss.earned += bonus;
+      addKippen(bonus);
+      renderBoss(); renderHud();
+      return;
+    }
     if (!damageBoss(bossClick())) renderBoss();
   });
 
