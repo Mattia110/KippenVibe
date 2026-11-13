@@ -58,6 +58,12 @@
     text-shadow: 0 0 6px #ffd24a, 0 0 14px #ff9a2a;
     animation: hairglow 0.5s ease-in-out infinite alternate;
   }
+  /* Teil des Kippenbergs, der oben aus der Szene ragt: Unterkante = Oberkante der obersten Szenenzeile
+     (34 Zeilen x 1.15em über dem Szenenboden), rechtsbündig wie der Berg in der Szene */
+  #piletop {
+    position: absolute; right: 13px; bottom: calc(9px + 39.1em); z-index: 1;
+    color: #cfc6b0; pointer-events: none;
+  }
   @keyframes hairglow { from { filter: brightness(1); } to { filter: brightness(1.4); } }
   #scene {
     font-size: 1em;
@@ -156,6 +162,7 @@
   <main>
     <div id="scenewrap">
       <pre id="hair" aria-hidden="true"></pre>
+      <pre id="piletop" aria-hidden="true"></pre>
       <pre id="scene" aria-label="ASCII-Figur" role="img"></pre>
     </div>
     <div class="side">
@@ -800,10 +807,43 @@
 
   // ---- Kippenberg ---------------------------------------------------------
   // Rechts in der Szene. Bis 30 Kippen ist jeder Stummel ein Zeichen, danach wächst der Berg langsamer.
-  const PILE_W = 19, PILE_X0 = W - PILE_W, PILE_MAX_H = 20, PILE_MAX = 180;
+  // Der Berg wächst ohne Obergrenze, aber langsam (mit der fünften Wurzel der gerauchten Kippen):
+  // 1.000 Kippen = 12 Stummel, 1 Mio. = 60, 1 Mrd. = 249, 1 Bio. = 1.001.
+  // Was über die Szene hinausragt, steht in einer eigenen Ebene darüber (#piletop).
+  const PILE_W = 19, PILE_X0 = W - PILE_W;
   const pile = new Array(PILE_W).fill(0);
-  let pileCount = 0;
-  const cellsFor = n => n <= 30 ? Math.floor(n) : Math.min(PILE_MAX, Math.floor(30 + 21 * Math.log10(n / 30)));
+  let pileCount = 0, pileDirty = true;
+  const cellsFor = n => Math.max(0, Math.floor(4 * Math.pow(n, 0.2) - 3));
+  // Zeichen und Farbe eines Stummels ('' = Standardfarbe)
+  const pileCell = (i, k) => {
+    const v = (i * 7 + k * 13) % 6;
+    return ['=#=~=-'[v], v === 1 ? '#c98f4e' : v === 3 ? '#8a8474' : ''];
+  };
+  const pileTopEl = document.getElementById('piletop');
+  const sceneWrapEl = document.getElementById('scenewrap');
+  let hairOver = 0;              // Zeilen, die die Super-Saiyajin-Haare über die Szene hinausragen
+
+  // Platz über der Szene für alles, was oben herausragt (Haare, Kippenberg)
+  function updatePad() {
+    const over = Math.max(0, hairOver, Math.max(...pile) - H);
+    sceneWrapEl.style.paddingTop = over ? `${(over * 1.15).toFixed(2)}em` : '';
+  }
+
+  // Teil des Bergs oberhalb der Szene
+  function renderPileTop() {
+    pileDirty = false;
+    let html = '';
+    for (let k = Math.max(...pile) - 1; k >= H; k--) {
+      for (let i = 0; i < PILE_W; i++) {
+        if (pile[i] <= k) { html += ' '; continue; }
+        const [c, col] = pileCell(i, k);
+        html += col ? `<span style="color:${col}">${c}</span>` : c;
+      }
+      if (k > H) html += '\n';
+    }
+    pileTopEl.innerHTML = html;
+    updatePad();
+  }
   const pileH = i => (i < 0 || i >= PILE_W) ? Infinity : pile[i];
 
   // Spalte, in der ein Stummel liegen bleibt: landet nahe der Mitte und rollt den Hang hinunter
@@ -815,15 +855,13 @@
       if (canL && canR) i += Math.random() < 0.5 ? -1 : 1;
       else if (canL) i -= 1;
       else if (canR) i += 1;
-      else if (h >= PILE_MAX_H) i += l <= r ? -1 : 1;
       else break;
     }
     return i;
   }
 
   function addPileCell(i) {
-    if (pile[i] >= PILE_MAX_H) i = pickColumn();
-    pile[i]++; pileCount++;
+    pile[i]++; pileCount++; pileDirty = true;
   }
 
   function syncPile() {
@@ -831,20 +869,39 @@
     while (pileCount < target) addPileCell(pickColumn());
   }
 
-  function resetPile() { pile.fill(0); pileCount = 0; shiny = null; }
+  function resetPile() { pile.fill(0); pileCount = 0; pileDirty = true; shiny = null; }
 
   // Shiny-Kippe: glitzert ab und zu ~20 s lang oben auf dem Berg; anklicken gibt 500 Kippen
   const SHINY_BONUS = 500, SHINY_TICKS = 220, SHINY_COLORS = ['#ffffff', '#ffd24a', '#9ad0ff', '#ff9ec8'];
   let shiny = null, nextShiny = 330;   // in Loop-Ticks (erste nach ~30 s)
-  const shinyPos = () => ({ x: PILE_X0 + shiny.col, y: H - pile[shiny.col] });
+  const shinyPos = () => ({ x: PILE_X0 + shiny.col, y: H - 1 - shiny.k });
+
+  // Stellen im Berg, die gerade wirklich zu sehen sind: innerhalb der Szene und im Browserfenster.
+  // Je Spalte der oberste sichtbare Stummel.
+  function visiblePileSpots() {
+    const r = sceneEl.getBoundingClientRect(), cs = getComputedStyle(sceneEl);
+    const left = parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+    const top = parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop);
+    const cw = (r.width - 2 * left) / W, chh = (r.height - 2 * top) / H;
+    const spots = [];
+    for (let i = 1; i < PILE_W - 1; i++) {
+      const px = r.left + left + (PILE_X0 + i - 1) * cw;
+      if (px < 0 || px + 3 * cw > innerWidth) continue;
+      for (let k = Math.min(pile[i], H) - 1; k >= 0; k--) {
+        const py = r.top + top + (H - 1 - k) * chh;
+        if (py + chh > innerHeight) break;          // alles darunter ist auch nicht zu sehen
+        if (py >= 0) { spots.push({ col: i, k }); break; }
+      }
+    }
+    return spots;
+  }
 
   function shinyTick() {
     if (!shiny) {
       if (loopTick < nextShiny) return;
-      const cols = [];
-      for (let i = 1; i < PILE_W - 1; i++) if (pile[i] > 0) cols.push(i);
-      if (!cols.length) return;
-      shiny = { col: cols[Math.floor(Math.random() * cols.length)], life: SHINY_TICKS };
+      const spots = visiblePileSpots();
+      if (!spots.length) return;   // Berg gerade nicht im Bild: später noch einmal versuchen
+      shiny = { ...spots[Math.floor(Math.random() * spots.length)], life: SHINY_TICKS };
       setStatus('Im Kippenberg glitzert etwas ...', 2500);
       return;
     }
@@ -863,7 +920,8 @@
     const { x, y } = shinyPos();
     for (let i = 0; i < 14; i++) spawn(x, y, rnd(-1.2, 1.2), rnd(-0.9, 0.1), rnd(8, 16), 'spark');
     endShiny();
-    const bonus = SHINY_BONUS * Math.pow(2, prestige);   // jedes Prestige verdoppelt
+    // 500 Kippen je Stummel im Berg, jedes Prestige verdoppelt
+    const bonus = SHINY_BONUS * Math.max(1, pileCount) * Math.pow(2, prestige);
     addKippen(bonus);
     setStatus(`★ Shiny-Kippe! +${fmt(bonus)} Kippen ★`, 2500);
     save();
@@ -1228,10 +1286,11 @@
 
     // Kippenberg
     for (let i = 0; i < PILE_W; i++)
-      for (let k = 0; k < pile[i]; k++) {
-        const v = (i * 7 + k * 13) % 6;
-        put(PILE_X0 + i, H - 1 - k, '=#=~=-'[v], v === 1 ? '#c98f4e' : v === 3 ? '#8a8474' : '#cfc6b0');
+      for (let k = 0, n = Math.min(pile[i], H); k < n; k++) {
+        const [c, col] = pileCell(i, k);
+        put(PILE_X0 + i, H - 1 - k, c, col || '#cfc6b0');
       }
+    if (pileDirty) renderPileTop();
 
     // Figur (mit Kopfbedeckung)
     const flick = Math.floor(performance.now() / 180);
@@ -1565,12 +1624,11 @@
   // ---- Super-Saiyajin -----------------------------------------------------
   const saiyanEl = document.getElementById('saiyan');
   const hairEl = document.getElementById('hair');
-  const wrapEl = document.getElementById('scenewrap');
 
   // Fünf Zacken, die mittlere am höchsten. Höhe = 3 + 2 x Stufe Zeilen, ohne Obergrenze:
   // ragen die Haare über die Szene hinaus, rückt die Szene nach unten und die Seite wird länger.
   function renderHair() {
-    if (!saiyan) { hairEl.textContent = ''; wrapEl.style.paddingTop = ''; return; }
+    if (!saiyan) { hairEl.textContent = ''; hairOver = 0; updatePad(); return; }
     const h = 3 + 2 * saiyan, mid = 9;   // mid = Spalte der Kopfmitte
     const gap = Math.min(3, 2 + Math.floor(saiyan / 4)), half0 = Math.min(3, 1.5 + 0.35 * saiyan);
     const cells = new Map();
@@ -1595,7 +1653,8 @@
     }
     hairEl.textContent = lines.join('\n');
     hairEl.style.left = `calc(13px + ${minX}ch)`;
-    wrapEl.style.paddingTop = `${(Math.max(0, h - BASE) * 1.15).toFixed(2)}em`;
+    hairOver = Math.max(0, h - BASE);
+    updatePad();
   }
 
   saiyanEl.addEventListener('click', () => {
