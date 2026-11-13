@@ -506,6 +506,51 @@
       frames: [['    .-^-.', '  _/ o o \\_', ' (*_*_*_*_*)'], ['    .-^-.', '  _/ o o \\_', ' (_*_*_*_*_)']] }
   ];
   // Passiver Buff "Bürgergeld": ab 100.000 gerauchten Kippen schaut Merz vorbei (5.000 Kippen pro Klick)
+  // Malboro Mann: selten (weight), größer als alle anderen, nur einmal pro Auftritt anklickbar (once).
+  // In der Bildmitte bäumt sich das Pferd kurz auf (rearFrames).
+  const bigArt = s => s.split('\n').slice(1);
+  VISITORS.push({
+    id: 'malboro', name: 'Malboro Mann', dir: -1, speed: 1.3, bonus: 100000, once: true, weight: 0.25,
+    color: '#d9a05a', smoke: [9, 2], say: 'Der Malboro Mann reitet ein! Schnell anklicken!',
+    frames: [bigArt(String.raw`
+            ___
+          _/___\_
+         *=(-_-)
+   ,~~,     /|#|\
+  / o  \___/_|_|_\____
+ (__,              \  \~
+     \___,_______,_/  ~
+      //  \\   //  \\ .
+     //    \\ //    \\ .`), bigArt(String.raw`
+            ___
+          _/___\_
+         *=(-_-)
+   ,~~,     /|#|\
+  / o  \___/_|_|_\____
+ (__,              \  \ ~
+     \___,_______,_/   ~
+      ||   ||  ||   ||
+      ||   ||  ||   ||`)],
+    rearFrames: [bigArt(String.raw`
+    ,~~,       ___
+   / o  \    _/___\_
+  (__,   \  *=(-_-)
+   //\\   \   /|#|\
+  //  \\   \_/_|_|_\__
+            \         \ ~
+             \______,_/ ~
+                 // \\ .
+                //   \\ .`), bigArt(String.raw`
+    ,~~,       ___
+   / o  \    _/___\_
+  (__,   \  *=(-_-)
+  //\\    \   /|#|\
+   \\ //   \_/_|_|_\__
+            \         \~
+             \______,_/~
+                 // \\ .
+                //   \\ .`)]
+  });
   const BUFF_NEED = 100000, DOC_BONUS = 100;
   VISITORS.push({
     id: 'merz', name: 'Merz', need: BUFF_NEED, dir: -1, speed: 0.8, bonus: 5000, color: '#d8d8d8',
@@ -874,11 +919,12 @@
   // noch nicht angeklickter Gast unter dem Mauszeiger (mit einer Zelle Rand zum leichteren Treffen)
   function guestAt(e) {
     const c = cellAt(e);
-    if (visitor) {
+    if (visitor && !visitor.paid) {
       const rows = visitor.v.frames[0].length;
       if (c.x >= visitor.x - 1 && c.x <= visitor.x + visitor.w + 1
         && c.y >= visitor.y - rows - 1 && c.y <= visitor.y + 2)
-        return { name: visitor.v.name, bonus: visitor.v.bonus, x: visitor.x + visitor.w / 2, y: visitor.y - 1 };
+        return { name: visitor.v.name, bonus: visitor.v.bonus, x: visitor.x + visitor.w / 2, y: visitor.y - 1,
+          once: visitor.v.once ? visitor : null };
     }
     if (doc && c.x >= doc.x - 1 && c.x <= doc.x + 8 && c.y >= H - 5)
       return { name: 'Arzt', bonus: DOC_BONUS, x: doc.x + 3, y: H - 3 };
@@ -886,6 +932,7 @@
   }
   function collectGuest(hit) {
     if (!hit) return;
+    if (hit.once) { hit.once.paid = true; sceneEl.style.cursor = ''; }   // nur einmal pro Auftritt
     for (let k = 0; k < 6; k++)
       spawn(hit.x, hit.y, rnd(-1.2, 1.2), rnd(-0.9, 0.1), rnd(8, 16), 'spark', { color: HOT, front: true });
     // jedes Prestige verdoppelt die Klick-Belohnung der Besucher
@@ -1318,7 +1365,8 @@
     // Besucher
     if (visitor) {
       const v = visitor.v, fr = Math.floor(visitor.t / 3);
-      const f = v.frames[fr % v.frames.length], hop = v.hop ? fr % 2 : 0;
+      const set = visitor.rear > 0 ? v.rearFrames : v.frames;
+      const f = set[fr % set.length], hop = v.hop ? fr % 2 : 0;
       f.forEach((l, i) => put(Math.round(visitor.x), visitor.y - hop - (f.length - 1) + i, l, v.color));
     }
 
@@ -1799,14 +1847,26 @@
     if (!visitor) {
       if (loopTick < nextVisitor) return;
       const pool = VISITORS.filter(v => (v.need || 0) <= smoked);
-      const v = pool[Math.floor(Math.random() * pool.length)];
+      // gewichtete Auswahl: seltene Besucher haben ein kleines weight
+      let pick = Math.random() * pool.reduce((sum, v) => sum + (v.weight || 1), 0);
+      const v = pool.find(v => (pick -= v.weight || 1) < 0) || pool[0];
       const w = Math.max(...v.frames[0].map(l => l.length));
       visitor = { v, w, t: 0, x: v.dir < 0 ? W : -w, y: v.sky ? Math.floor(rnd(6, 13)) : H - 1 };
       setStatus(v.say, 2500);
       return;
     }
     const s = visitor, v = s.v;
-    s.t++; s.x += v.dir * v.speed;
+    s.t++;
+    if (s.rear > 0) {
+      s.rear--;                  // das Pferd steht auf den Hinterbeinen
+    } else {
+      s.x += v.dir * v.speed;
+      // in der Bildmitte einmal aufbäumen
+      if (v.rearFrames && !s.reared && Math.abs(s.x + s.w / 2 - W / 2) < v.speed) {
+        s.reared = true; s.rear = 28;
+        setStatus('*WIEHER!* Das Pferd bäumt sich auf.', 2500);
+      }
+    }
     if (v.smoke && s.t % 3 === 0) {
       const sx = s.x + v.smoke[0];
       if (sx >= 0 && sx < W)
