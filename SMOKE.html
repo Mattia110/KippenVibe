@@ -585,9 +585,10 @@
   const STORY_COST = 250e9, STORY_MAX = 10, STORY_TITLE = 'Der Kippen Allwissende';
   let stories = 0;
   // Super-Saiyajin: je Stufe 1 Bio. Kippen, die gelben Haare wachsen mit jeder Stufe (ohne Obergrenze)
-  const SAIYAN_COST = 1e12;
+  const SAIYAN_COST = 1e12, SAIYAN_GROWTH = 1.05;   // jede Stufe kostet 5 % mehr als die vorige
   let saiyan = 0;
-  let bossWins = 0;             // besiegte Bosse (bestimmt, welcher als nächster kommt)
+  const saiyanCost = () => Math.ceil(SAIYAN_COST * Math.pow(SAIYAN_GROWTH, saiyan));
+  let bossWins = 0;            // besiegte Bosse (bestimmt, welcher als nächster kommt)
 
   // Fortschritt im Browser merken (funktioniert auch ohne Speicher)
   const STORE = 'ascii-raucherpause';
@@ -920,8 +921,8 @@
     const { x, y } = shinyPos();
     for (let i = 0; i < 14; i++) spawn(x, y, rnd(-1.2, 1.2), rnd(-0.9, 0.1), rnd(8, 16), 'spark');
     endShiny();
-    // 500 Kippen je Stummel im Berg, jedes Prestige verdoppelt
-    const bonus = SHINY_BONUS * Math.max(1, pileCount) * Math.pow(2, prestige);
+    // 500 Kippen je Stummel im Berg, jedes Prestige verdoppelt, jede Saiyajin-Stufe gibt +100 %
+    const bonus = SHINY_BONUS * Math.max(1, pileCount) * Math.pow(2, prestige) * (1 + saiyan);
     addKippen(bonus);
     setStatus(`★ Shiny-Kippe! +${fmt(bonus)} Kippen ★`, 2500);
     save();
@@ -1658,8 +1659,9 @@
   }
 
   saiyanEl.addEventListener('click', () => {
-    if (bank < SAIYAN_COST) return;
-    bank -= SAIYAN_COST;
+    const cost = saiyanCost();
+    if (bank < cost) return;
+    bank -= cost;
     saiyan++;
     save();
     setStatus(`*KAAAAAH!* SUPER-SAIYAJIN Stufe ${saiyan}!`, 4000);
@@ -1681,8 +1683,8 @@
   });
 
   function renderHud() {
-    saiyanEl.disabled = bank < SAIYAN_COST;
-    setText(saiyanEl, `[ SUPER-SAIYAJIN Stufe ${saiyan + 1} · ${fmt(SAIYAN_COST)} Kippen ]`);
+    saiyanEl.disabled = bank < saiyanCost();
+    setText(saiyanEl, `[ SUPER-SAIYAJIN Stufe ${saiyan + 1} · ${fmt(saiyanCost())} Kippen ]`);
     storyBuyEl.disabled = stories >= STORY_MAX || bank < STORY_COST;
     setText(storyBuyEl, stories >= STORY_MAX
       ? `[ Alle ${STORY_MAX} Kippen-Storys gesammelt · ${STORY_TITLE} ]`
