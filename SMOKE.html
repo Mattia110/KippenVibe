@@ -582,7 +582,10 @@
   let prestige = 0;
   // Kippen-Storys: je 250 Mrd. Kippen, bleiben auch nach einem Prestige.
   // Wer alle hat, trägt den Titel "Der Kippen Allwissende".
-  const STORY_COST = 250e9, STORY_MAX = 10, STORY_TITLE = 'Der Kippen Allwissende';
+  const STORY_COST = 250e9, STORY_MAX = 25;
+  // Titel über dem Kopf: [nötige Storys, Titel]. Angezeigt wird immer der höchste erreichte.
+  const STORY_TITLES = [[10, 'Der Kippen Allwissende'], [25, 'Kippen Bewusstsein']];
+  const storyTitle = () => STORY_TITLES.reduce((t, [n, name]) => stories >= n ? name : t, '');
   let stories = 0;
   // Super-Saiyajin: je Stufe 1 Bio. Kippen, die gelben Haare wachsen mit jeder Stufe (ohne Obergrenze)
   const SAIYAN_COST = 1e12, SAIYAN_GROWTH = 1.05;   // jede Stufe kostet 5 % mehr als die vorige
@@ -1316,12 +1319,12 @@
     }
     if (prestige > STAR_MAX) put(18, 16, `x${prestige}`, HOT);
 
-    // Titel für alle zehn Kippen-Storys: leuchtet über dem Kopf in wandernden Regenbogenfarben
-    if (stories >= STORY_MAX)
-      for (let i = 0; i < STORY_TITLE.length; i++) {
-        const c = RAINBOW[(i + flick) % RAINBOW.length];
-        put(i, 18, STORY_TITLE[i], `${c};font-weight:bold;text-shadow:0 0 6px ${c},0 0 12px ${c}`);
-      }
+    // Story-Titel: leuchtet über dem Kopf in wandernden Regenbogenfarben
+    const title = storyTitle();
+    for (let i = 0; i < title.length; i++) {
+      const c = RAINBOW[(i + flick) % RAINBOW.length];
+      put(i, 18, title[i], `${c};font-weight:bold;text-shadow:0 0 6px ${c},0 0 12px ${c}`);
+    }
 
     // Zigarette (beim Kotzen nimmt er sie kurz raus)
     if (phase !== 'idle' && pukeT === 0 && pipe) {
@@ -1577,7 +1580,37 @@
     { t: 'Tomas und die Aliens',
       s: 'Die Aliens flogen vierzig Lichtjahre weit zur Erde, um die Menschheit zu warnen. Dann bot Tomas ihnen eine Kippe an. Jetzt kreisen sie über der Tankstelle und fragen, ob jemand eine übrig hat.' },
     { t: 'JakobFuckingJones',
-      s: 'Als JakobFuckingJones seine erste Kippe anzündete, ging die Sonne freiwillig unter. Er raucht nicht, die Zigaretten rauchen ihn, aus Respekt. Auf seinem Kippenberg steht ein Schild: „Rauchen verboten.“ Es gilt für alle außer ihm.' }
+      s: 'Als JakobFuckingJones seine erste Kippe anzündete, ging die Sonne freiwillig unter. Er raucht nicht, die Zigaretten rauchen ihn, aus Respekt. Auf seinem Kippenberg steht ein Schild: „Rauchen verboten.“ Es gilt für alle außer ihm.' },
+    { t: 'Der Erfasser',
+      s: 'Der Erfasser erfasst alles: jede Kippe, jeden Zug, jeden Huster. Nur seine eigene Schachtel hat er nie erfasst. Deshalb ist sie laut Statistik seit Jahren voll.' },
+    { t: 'Robin und der Kippenberg',
+      s: 'Robin wollte den Kippenberg besteigen. Auf halber Höhe machte er Raucherpause. Der Berg wuchs dabei schneller, als Robin klettern konnte. Er ist bis heute unterwegs.' },
+    { t: 'Marios Glückskippe',
+      s: 'Mario drehte seine Glückskippe in der Schachtel um. Dann drehte er vorsichtshalber alle anderen auch um. Seitdem hat er zwanzig Glückskippen und kein Glück, aber ein gutes Gefühl.' },
+    { t: 'Der KippenDieb',
+      s: 'Der KippenDieb stahl Daniel eine ganze Stange. Daniel merkte es erst nach drei Wochen, weil er gerade „aufgehört“ hatte. Der Dieb brachte sie freiwillig zurück. Das schlechte Gewissen ging noch, aber der Husten war zu stark.' },
+    { t: 'Adrian hört auf',
+      s: 'Adrian las ein Buch darüber, wie man mit dem Rauchen aufhört. Es war so spannend, dass er dabei zwei Schachteln rauchte. Die Fortsetzung hat er schon vorbestellt.' },
+    { t: 'Tomas im Nichtraucherabteil',
+      s: 'Tomas setzte sich versehentlich ins Nichtraucherabteil. Aus Höflichkeit hielt er die Kippe aus dem Fenster. Der Zug hatte danach vierzig Minuten Verspätung wegen „Rauchentwicklung auf der Strecke“.' },
+    { t: 'Mattias Feuerzeuge',
+      s: 'Mattia besitzt dreihundert Feuerzeuge. Keines davon hat er gekauft. Keines davon funktioniert. Er sagt, es gehe ihm ums Prinzip.' },
+    { t: 'Der Malboro Mann',
+      s: 'Der Malboro Mann ritt in den Sonnenuntergang. Nach zehn Metern musste das Pferd husten. Seitdem reitet er nur noch bergab und nennt es Freiheit.' },
+    { t: 'Merz und das Bürgergeld',
+      s: 'Merz wollte nur kurz vorbeischauen. Jemand klickte ihn an, und fünftausend Kippen fielen aus seinem Jackett. Er versteht bis heute nicht, wie das passieren konnte, und kommt trotzdem immer wieder.' },
+    { t: 'Jakob und der Vulkan',
+      s: 'Der Vulkan rauchte seit zehntausend Jahren. Dann stellte sich JakobFuckingJones daneben und zündete sich eine an. Der Vulkan hat aus Scham aufgehört.' },
+    { t: 'Rauchzeichen',
+      s: 'Robin wollte Daniel per Rauchzeichen zum Grillen einladen. Daniel antwortete ebenfalls mit Rauchzeichen. Die Feuerwehr kam mit drei Löschzügen und blieb zum Essen.' },
+    { t: 'Die Wette',
+      s: 'Mario wettete mit Tomas, wer länger ohne Kippe aushält. Nach vier Minuten gingen beide „kurz Luft schnappen“. Sie trafen sich hinter dem Haus und einigten sich auf Unentschieden.' },
+    { t: 'Der E-Zigaretten Raucher',
+      s: 'Der E-Zigaretten Raucher blies eine Wolke mit Mango-Eis-Geschmack in die Runde, der Shisharaucher legte Doppelapfel nach. Adrian sah beide lange an. „Das ist kein Rauchen“, sagte er. „Das ist Obstsalat mit Akku und Obstsalat mit Schlauch.“ Seitdem müssen beide draußen bleiben, und zwar noch weiter draußen als die Raucher.' },
+    { t: 'Daniel und der Hamster',
+      s: 'Daniel kaufte einen Hamster fürs Rauchrad. Der Hamster lief drei Tage, dann verlangte er Urlaub, Weihnachtsgeld und eine eigene Marke. Daniel raucht seitdem wieder selbst.' },
+    { t: 'Kippen Bewusstsein',
+      s: 'Am Ende saßen alle zusammen auf dem Kippenberg: Daniel, Adrian, Mattia, Tomas, Robin, Mario und Jakob. Keiner sagte etwas. Der Erfasser zählte den Rauch. Und für einen Moment waren alle eins mit der Kippe.' }
   ];
   const storyBuyEl = document.getElementById('storybuy');
   const storyListEl = document.getElementById('storylist');
@@ -1615,7 +1648,8 @@
     bank -= STORY_COST;
     stories++;
     save();
-    setStatus(stories >= STORY_MAX ? `★★★ Alle Storys! Du bist „${STORY_TITLE}“ ★★★`
+    const won = STORY_TITLES.find(([n]) => n === stories);
+    setStatus(won ? `★★★ ${stories} Storys! Neuer Titel: „${won[1]}“ ★★★`
       : `Neue Kippen-Story: ${STORIES[stories - 1].t}`, 4000);
     showStory(stories - 1);
     renderHud(); draw();
@@ -1687,8 +1721,10 @@
     setText(saiyanEl, `[ SUPER-SAIYAJIN Stufe ${saiyan + 1} · ${fmt(saiyanCost())} Kippen ]`);
     storyBuyEl.disabled = stories >= STORY_MAX || bank < STORY_COST;
     setText(storyBuyEl, stories >= STORY_MAX
-      ? `[ Alle ${STORY_MAX} Kippen-Storys gesammelt · ${STORY_TITLE} ]`
-      : `[ KIPPEN-STORY ${stories + 1}/${STORY_MAX} kaufen · ${fmt(STORY_COST)} Kippen ]`);
+      ? `[ Alle ${STORY_MAX} Kippen-Storys gesammelt · ${storyTitle()} ]`
+      : `[ KIPPEN-STORY ${stories + 1}/${STORY_MAX} kaufen · ${fmt(STORY_COST)} Kippen ]`
+        + ((STORY_TITLES.find(([n]) => n > stories) || [])[0]
+          ? ` · Titel bei ${STORY_TITLES.find(([n]) => n > stories)[0]}` : ''));
     prestigeEl.hidden = !owned.vulkan;
     prestigeEl.disabled = bank < PRESTIGE_COST;
     setText(prestigeEl, `[ PRESTIGE ${prestige + 1} · ${fmt(PRESTIGE_COST)} Kippen ]`);
