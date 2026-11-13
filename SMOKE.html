@@ -1,0 +1,1830 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASCII-Raucherpause</title>
+<style>
+  :root {
+    --bg: #0d0f0c;
+    --fg: #b8c4a6;
+    --dim: #6b7562;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  h1 { font-size: 1.1rem; font-weight: normal; letter-spacing: 0.2em; margin: 0 0 4px; }
+  p.sub { margin: 0 0 16px; color: var(--dim); font-size: 0.85rem; text-align: center; }
+  .picker { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; }
+  #chars { margin-bottom: 20px; }
+  #reset { margin-top: 24px; font: inherit; font-size: 0.75rem; background: none; border: 0; color: var(--dim); cursor: pointer; text-decoration: underline; }
+  .picker button {
+    font: inherit;
+    font-size: 0.85rem;
+    background: none;
+    color: var(--dim);
+    border: 1px solid #2a2f26;
+    padding: 5px 12px;
+    cursor: pointer;
+  }
+  .picker button:hover:not(:disabled) { color: var(--fg); border-color: var(--dim); }
+  .picker button.active { color: var(--c); border-color: var(--c); }
+  .picker button:disabled { cursor: default; opacity: 0.5; }
+  .picker button.active:disabled { opacity: 1; }
+  main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: flex-end;
+    justify-content: center;
+    max-width: 100%;
+  }
+  pre { margin: 0; font: inherit; line-height: 1.15; }
+  #scene {
+    font-size: clamp(6px, 1.1vw, 16px);
+    border: 1px solid #2a2f26;
+    padding: 8px 12px;
+    background: #10130f;
+    overflow: hidden;
+  }
+  #scene .shiny { cursor: pointer; font-weight: bold; text-shadow: 0 0 6px #fff, 0 0 12px #ffd24a; }
+  #scene .drop { cursor: pointer; font-weight: bold; color: #9be05a; text-shadow: 0 0 6px #9be05a, 0 0 12px #3f8f2a; }
+  .side { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  #pack {
+    background: none;
+    border: 0;
+    padding: 6px;
+    font: inherit;
+    font-size: clamp(10px, 2.6vw, 15px);
+    cursor: pointer;
+    text-align: left;
+    transition: transform 0.12s, opacity 0.2s;
+  }
+  #pack:hover:not(:disabled) { transform: translateY(-3px) rotate(-1.5deg); filter: brightness(1.25); }
+  #pack:active:not(:disabled) { transform: translateY(1px); }
+  #pack:focus-visible { outline: 1px dashed var(--fg); }
+  #pack:disabled { cursor: default; opacity: 0.55; }
+  #pack b { font-weight: bold; }
+  #turbo {
+    font: inherit;
+    font-size: 0.95rem;
+    background: none;
+    color: #ff8a2a;
+    border: 1px solid #ff8a2a;
+    padding: 8px 14px;
+    cursor: pointer;
+    user-select: none;
+    touch-action: manipulation;
+  }
+  #turbo:hover:not(:disabled) { background: #2a1a0c; }
+  #turbo:active:not(:disabled) { transform: translateY(2px); background: #4a2a10; }
+  #turbo:disabled { opacity: 0.35; cursor: default; }
+  #speed { font-size: 0.8rem; color: var(--dim); white-space: pre; text-align: center; }
+  #shopwrap { margin-top: 28px; width: 100%; max-width: 980px; }
+  #bank { text-align: center; font-size: 1.05rem; color: #ffd24a; margin-bottom: 4px; }
+  #rate { text-align: center; font-size: 0.8rem; color: var(--dim); margin-bottom: 12px; }
+  #shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+  #shop button {
+    font: inherit; font-size: 0.8rem; text-align: left;
+    background: #10130f; color: var(--fg);
+    border: 1px solid #3a4234; padding: 8px 10px; cursor: pointer;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  #shop button:hover:not(:disabled) { border-color: #ffd24a; }
+  #shop button:active:not(:disabled) { transform: translateY(1px); }
+  #shop button:disabled { opacity: 0.4; cursor: default; }
+  #shop .un { color: #ffd24a; font-size: 0.9rem; }
+  #shop .ue { color: var(--dim); }
+  #boss {
+    background: none; border: 1px solid currentColor; padding: 8px 10px;
+    font: inherit; font-size: clamp(10px, 2.6vw, 15px); text-align: left;
+    cursor: crosshair; user-select: none; touch-action: manipulation;
+  }
+  #boss[hidden], #pack[hidden] { display: none; }
+  #bossname { text-align: center; font-weight: bold; margin-bottom: 6px; }
+  #bosshp { height: 14px; border: 1px solid var(--fg); background: #1a1f18; margin-bottom: 10px; }
+  #bosshpfill { height: 100%; width: 100%; background: #5fd05f; transition: width 0.09s linear; }
+  #boss pre { font-weight: bold; animation: bossbob 0.9s ease-in-out infinite; }
+  #boss.hit pre { animation: none; transform: scale(0.96); filter: brightness(2.2); }
+  #bossinfo { margin-top: 8px; font-size: 0.8rem; white-space: pre; text-align: center; color: var(--fg); }
+  @keyframes bossbob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  #storylist { margin-top: 12px; }
+  #storytext {
+    max-width: 640px; margin: 4px auto 0; padding: 12px 16px;
+    border: 1px solid #ffd24a; background: #10130f; font-size: 0.9rem; line-height: 1.6;
+  }
+  #storytext b { color: #ffd24a; }
+  #prestige, #storybuy {
+    display: block; margin: 16px auto 0;
+    font: inherit; font-size: 0.95rem;
+    background: none; color: #ffd24a; border: 1px solid #ffd24a;
+    padding: 8px 14px; cursor: pointer;
+  }
+  #prestige[hidden] { display: none; }
+  #prestige:hover:not(:disabled), #storybuy:hover:not(:disabled) { background: #2a240c; }
+  #prestige:disabled, #storybuy:disabled { opacity: 0.4; cursor: default; }
+  #status { min-height: 1.3em; font-size: 0.9rem; text-align: center; }
+  #stats { color: var(--dim); font-size: 0.8rem; text-align: center; }
+</style>
+</head>
+<body>
+  <h1>ASCII-RAUCHERPAUSE</h1>
+  <p class="sub">Rauchen, Kippen sammeln, Upgrades kaufen. Garantiert teer- und nikotinfrei.</p>
+
+  <div id="brands" class="picker" role="group" aria-label="Marke"></div>
+  <div id="chars" class="picker" role="group" aria-label="Charakter"></div>
+
+  <main>
+    <pre id="scene" aria-label="ASCII-Figur" role="img"></pre>
+    <div class="side">
+      <button id="boss" type="button" hidden><div id="bossname"></div><div id="bosshp"><div id="bosshpfill"></div></div><pre id="bossart"></pre><div id="bossinfo"></div></button>
+      <button id="pack" type="button" aria-label="Zigarettenschachtel"></button>
+      <button id="turbo" type="button">[ SCHNELLER ZIEHEN ]</button>
+      <div id="speed"></div>
+      <div id="status" aria-live="polite"></div>
+      <div id="stats"></div>
+    </div>
+  </main>
+
+  <section id="shopwrap" aria-label="Upgrades">
+    <div id="bank"></div>
+    <div id="rate"></div>
+    <div id="shop"></div>
+    <button id="prestige" type="button" hidden></button>
+    <button id="storybuy" type="button"></button>
+    <div id="storylist" class="picker"></div>
+    <div id="storytext" hidden></div>
+  </section>
+
+  <button id="reset" type="button">Fortschritt zurücksetzen</button>
+
+<script>
+(() => {
+  const W = 127, H = 34, TICK = 90;
+  const FULL_PACK = 20;
+  const BASE = H - 9;            // oberste Zeile des Kopfes
+  const MOUTH_ROW = BASE + 4;
+  const CIG_X = 16;              // Spalte, an der die Zigarette beginnt
+
+  const EMBER = '#ff8a2a', HOT = '#ffd24a', METAL = '#8fa3b5', WOOD = '#b98a55';
+
+  // ---- Marken -------------------------------------------------------------
+  const BRANDS = [
+    {
+      id: 'marlboro', name: 'Marlboro',
+      frame: '#e8e4dc', accent: '#e0483a',
+      art: ['/\\', '/  \\', '/    \\', 'Marlboro'],
+      len: 6, filter: '[#]', filterColor: '#c98f4e', paper: '#f1ead8',
+      smoke: ['#e4e8dc', '#9aa390', '#596152'],
+      exhale: 'stream', drag: 8, rest: 12, lighter: 'zippo',
+      hat: ['       .---.', '   ___/_____\\___'],
+      hair: '    /         \\',
+      say: { drag: '*zieht*', exhale: '*pffffff*', idle: 'Howdy. Lust auf eine?' }
+    },
+    {
+      id: 'newport', name: 'Newport',
+      frame: '#2fbf9f', accent: '#e8fff8',
+      art: ['N E W P O R T', '~~~~~~~~~~~', 'menthol', '100s'],
+      len: 9, filter: '[=]', filterColor: '#e8fff8', paper: '#f4fffb',
+      smoke: ['#d8fff4', '#7fd6c2', '#3f7f74'],
+      exhale: 'frost', drag: 8, rest: 10, lighter: 'zippo',
+      hat: ['', '     .=======.___'],
+      hair: '    /         \\',
+      say: { drag: '*zieht*', exhale: '*haaaah* ... frisch', idle: 'Eine Mentholfrische?' }
+    },
+    {
+      id: 'afri', name: 'Afri',
+      frame: '#d9a520', accent: '#f4efe0',
+      art: ['\\|/', '--*--', '|', 'A F R I'],
+      len: 6, filter: '[#]', filterColor: '#d9a520', paper: '#f1ead8',
+      smoke: ['#f3e6c0', '#b3a67c', '#6b6348'],
+      exhale: 'rings', drag: 9, rest: 12, lighter: 'zippo',
+      hat: null,
+      hair: '    /  ~~~~~  \\',
+      shades: true,
+      say: { drag: '*zieht lässig*', exhale: '*o  O  ( )*', idle: 'Ringe gefällig?' }
+    },
+    {
+      id: 'gauloises', name: 'Gauloises',
+      frame: '#4a7fd4', accent: '#dfe8ff',
+      art: ['<<(o)>>', 'GAULOISES', 'brunes', 'sans filtre'],
+      len: 5, filter: '', filterColor: '', paper: '#e9dcc0',
+      smoke: ['#b9c0cf', '#7b8296', '#474c5c'],
+      exhale: 'cough', drag: 6, rest: 8, lighter: 'match',
+      hat: ['          ,', '     _.-----._'],
+      hair: "    /'''''''''\\",
+      say: { drag: '*zieht kräftig*', exhale: '*pfff*', idle: 'Une cigarette ?' }
+    },
+    {
+      id: 'camel', name: 'Camel',
+      frame: '#c79a3c', accent: '#f0d890',
+      art: ['_/^\\_/^\\_', 'CAMEL', 'Turkish Blend', ''],
+      len: 7, filter: '[#]', filterColor: '#b9803f', paper: '#f1ead8',
+      smoke: ['#f2e2b0', '#b8a56d', '#6e6240'],
+      exhale: 'cloud', drag: 13, rest: 16, lighter: 'zippo',
+      hat: null,
+      hair: '    / ~~~~~~~ \\',
+      say: { drag: '*zieht gaaanz langsam*', exhale: '*hhhhhhhh*', idle: 'Nur die Ruhe.' }
+    },
+    // ---- freischaltbare Sorten (need = insgesamt gerauchte Kippen) ----------
+    {
+      id: 'herz', name: 'Herzblatt', need: 50,
+      frame: '#ff7eb6', accent: '#ffe0ee',
+      art: ['<3  <3  <3', 'HERZBLATT', 'rosa Rauch', 'mit Liebe'],
+      len: 6, filter: '[#]', filterColor: '#ff7eb6', paper: '#fff0f6',
+      smoke: ['#ff9ec8', '#d86a9a', '#7a3d5a'],
+      exhale: 'hearts', drag: 8, rest: 11, lighter: 'zippo', hat: null,
+      say: { drag: '*zieht verliebt*', exhale: '*haaach* <3', idle: 'Eine fürs Herz?' }
+    },
+    {
+      id: 'stern', name: 'Sternenstaub', need: 500,
+      frame: '#ffd24a', accent: '#fff6c8',
+      art: ['*  .  *  .  *', 'STERNENSTAUB', '. * . * .', 'funkelt'],
+      len: 6, filter: '[#]', filterColor: '#ffd24a', paper: '#fffbe8',
+      smoke: ['#fff6c8', '#c9b25a', '#6e6240'],
+      exhale: 'stars', drag: 8, rest: 11, lighter: 'zippo',
+      hat: ['        /\\', '    ___/**\\___'],
+      say: { drag: '*zieht*', exhale: '*funkel* *glitzer*', idle: 'Einmal Sternenhimmel?' }
+    },
+    {
+      id: 'regen', name: 'Regenbogen', need: 5000,
+      frame: '#9ad0ff', accent: '#ffffff',
+      art: ['.-~~~~~-.', 'REGENBOGEN', 'alle Farben', 'einhornfrei'],
+      len: 7, filter: '[=]', filterColor: '#ff7eb6', paper: '#ffffff',
+      smoke: ['#ffffff', '#b8c8d8', '#667788'],
+      exhale: 'rainbow', drag: 9, rest: 11, lighter: 'zippo', hat: null,
+      say: { drag: '*zieht bunt*', exhale: '*fwuuuuusch*', idle: 'Bunt gefällig?' }
+    },
+    {
+      id: 'sarg', name: 'Sargnagel', need: 50000,
+      frame: '#9a9a9a', accent: '#e8e8e8',
+      art: ['.-.', '(x x)', 'SARGNAGEL', 'extra stark'],
+      len: 5, filter: '', filterColor: '', paper: '#d8d8d0',
+      smoke: ['#d0d0d0', '#808080', '#404040'],
+      exhale: 'skulls', drag: 7, rest: 9, lighter: 'match', hat: null,
+      say: { drag: '*zieht finster*', exhale: '*röchel*', idle: 'Die letzte? Niemals.' }
+    },
+    {
+      id: 'donner', name: 'Donnerkeil', need: 1000000,
+      frame: '#7f8fb5', accent: '#ffd24a',
+      art: ['(  ~~~~  )', '/ / /', 'DONNERKEIL', 'Starkstrom'],
+      len: 7, filter: '[#]', filterColor: '#ffd24a', paper: '#dfe6f5',
+      smoke: ['#aab4cc', '#6a7490', '#3a4058'],
+      exhale: 'storm', exDur: 14, drag: 9, rest: 11, lighter: 'zippo', hat: null,
+      say: { drag: '*zieht geladen*', exhale: '*KRACH* *grummel*', idle: 'Lust auf ein Gewitter?' }
+    },
+    {
+      id: 'nova', name: 'Supernova', need: 10000000,
+      frame: '#b48cff', accent: '#e8dcff',
+      art: ['.  * .  @ .', 'SUPERNOVA', '. @ .  *  .', 'Lichtjahre'],
+      len: 7, filter: '[#]', filterColor: '#b48cff', paper: '#f0eaff',
+      smoke: ['#e8dcff', '#b48cff', '#5a4a9a'],
+      exhale: 'galaxy', exDur: 20, drag: 10, rest: 12, lighter: 'zippo', hat: null,
+      say: { drag: '*zieht kosmisch*', exhale: '*wuuuooom*', idle: 'Einmal Milchstraße?' }
+    },
+    {
+      id: 'seife', name: 'Seifenblase', need: 2000,
+      frame: '#9ad0ff', accent: '#ffffff',
+      art: ['o  O  o', 'SEIFENBLASE', '( )  o  O', 'blubb'],
+      len: 6, filter: '[=]', filterColor: '#9ad0ff', paper: '#f4fbff',
+      smoke: ['#e8f6ff', '#9ac0d8', '#566a78'],
+      exhale: 'bubbles', exDur: 12, drag: 8, rest: 11, lighter: 'zippo', hat: null,
+      say: { drag: '*zieht*', exhale: '*blubb* *plopp*', idle: 'Eine Runde Seifenblasen?' }
+    },
+    {
+      id: 'jazz', name: 'Blue Note', need: 20000,
+      frame: '#c9a36b', accent: '#fff6c8',
+      art: ['♪  ♫  ♪', 'BLUE NOTE', 'smooth jazz', '~ cool ~'],
+      len: 7, filter: '[#]', filterColor: '#c9a36b', paper: '#f1ead8',
+      smoke: ['#e8dcc0', '#a89878', '#5e5642'],
+      exhale: 'notes', exDur: 12, drag: 9, rest: 12, lighter: 'zippo', hat: null, shades: true,
+      say: { drag: '*zieht im Takt*', exhale: '*dubi dubi duu*', idle: 'Etwas Jazz?' }
+    },
+    {
+      id: 'silvester', name: 'Silvester', need: 200000,
+      frame: '#e0483a', accent: '#ffd24a',
+      art: ['*  \\|/  *', 'SILVESTER', '-- * --', 'Knallfrosch'],
+      len: 6, filter: '[#]', filterColor: '#e0483a', paper: '#f1ead8',
+      smoke: ['#f0e0d0', '#a89080', '#5a4a44'],
+      exhale: 'fireworks', exDur: 12, drag: 8, rest: 10, lighter: 'match', hat: null,
+      say: { drag: '*zieht*', exhale: '*pfiuuu* ... *BUMM*', idle: 'Prost Neujahr!' }
+    },
+    {
+      id: 'geist', name: 'Geisterstunde', need: 2500000,
+      frame: '#c8d0e8', accent: '#ffffff',
+      art: ['.-.', '(o o)', 'GEISTERSTUNDE', 'buh!'],
+      len: 6, filter: '[=]', filterColor: '#c8d0e8', paper: '#f0f2ff',
+      smoke: ['#e8ecff', '#9aa0c0', '#50546a'],
+      exhale: 'ghosts', exDur: 12, drag: 9, rest: 11, lighter: 'match', hat: null,
+      say: { drag: '*zieht schaurig*', exhale: '*huuuuuh*', idle: 'Glaubst du an Geister?' }
+    },
+    {
+      id: 'matrix', name: 'Matrix', need: 25000000,
+      frame: '#3fdf5f', accent: '#d8ffd8',
+      art: ['1 0 1 1 0 1', 'M A T R I X', '0 1 0 0 1 0', 'rote Pille'],
+      len: 7, filter: '[#]', filterColor: '#3fdf5f', paper: '#e8ffe8',
+      smoke: ['#d8ffd8', '#3fdf5f', '#1f6f2f'],
+      exhale: 'matrix', exDur: 14, drag: 10, rest: 11, lighter: 'zippo', hat: null, shades: true,
+      say: { drag: '*zieht in Zeitlupe*', exhale: '*01101011*', idle: 'Rote oder blaue Kippe?' }
+    },
+    {
+      // legendär: überall Flammen (Schachtel, Haare, Glut, Boden, Atem)
+      id: 'moods', name: 'Moods', need: 50000000, legend: true, fire: true,
+      frame: '#ff5a2a', accent: '#fff6c8',
+      art: [') ( )\\ ( /( )', 'M O O D S', '( ) ( ) ( ) (', 'LEGENDÄR'],
+      artFrames: [
+        [') ( )\\ ( /( )', 'M O O D S', '( ) ( ) ( ) (', 'LEGENDÄR'],
+        ['( ) (/ ) \\) (', 'M O O D S', ') ( ) ( ) ( )', 'LEGENDÄR']
+      ],
+      len: 7, filter: '', filterColor: '', paper: '#8a5a34',
+      smoke: ['#ffd24a', '#ff8a2a', '#b0301a'],
+      exhale: 'fire', exDur: 14, drag: 8, rest: 10, lighter: 'zippo',
+      hatFrames: [
+        ['     ) (  )  ( )', '    ( ) )( ( ) ('],
+        ['    (  ) (  ) (', '     ) ( () ) ( )']
+      ],
+      say: { drag: '*zieht feurig*', exhale: '*FWOOOOSH*', idle: 'Feuer gefällig?' }
+    }
+  ].sort((a, b) => (a.need || 0) - (b.need || 0));   // freischaltbare nach Schwelle sortiert
+  const BUBBLES = ['#9ad0ff', '#ffb8e0', '#d8fff4', '#fff6c8'];
+  const RAINBOW =['#b06aff', '#4a9bff', '#5fd05f', '#ffe14a', '#ff9a2a', '#ff4a4a'];
+  const STARS = ['#ffd24a', '#ffffff', '#9ad0ff', '#fff6c8'];
+
+  // ---- Charaktere ---------------------------------------------------------
+  // Zeilen: {E} = Auge, {M} = Mund (3 Zeichen). Mund muss in Spalte 12-14 bleiben.
+  const CHARS = [
+    {
+      id: 'none', name: 'Erfasser', need: 0, color: '', eye: 'o',
+      rows: ['     .-------.', '    /  ~~~~~  \\', '   |        {E}  |', '   |           >',
+             '   |        {M}|', '    \\         /', "     '--. .--'", "    .---' '---.", '   /           \\']
+    },
+    {
+      id: 'daniel', name: 'Daniel', need: 1, color: '#a8cdf0', eye: 'o',
+      rows: ['     .vVvVvVv.', '    /         \\', '   |        {E}  |', '   |           >',
+             '   |        {M}|', '    \\         /', "     '--. .--'", "    .---' '---.", '   /           \\']
+    },
+    {
+      id: 'adrian', name: 'Adrian', need: 5, color: '#b4eba0', eye: 'o',
+      rows: ['     .-------.', '    / @@@@@@@ \\', '   |      -({E}) |', '   |           >',
+             '   |        {M}|', '    \\         /', "     '--. .--'", "    .---' '---.", '   /           \\']
+    },
+    {
+      id: 'mattia', name: 'Mattia', need: 10, color: '#f0c090', eye: 'o',
+      rows: ['     .-------.', '    /=========\\', '   |        {E}  |', '   |           >',
+             '   |   :::::{M}|', '    \\:::::::::/', "     ':::. .--'", "    .---' '---.", '   /           \\']
+    },
+    {
+      id: 'tomas', name: 'Tomas', need: 15, color: '#deb0ea', eye: 'o',
+      rows: ['     .-------.', '    /         \\', '   |       ={E}  |', '   |         ~~>',
+             '   |        {M}|', '    \\         /', "     '--. .--'", "    .---'V'---.", '   /     V     \\']
+    },
+    {
+      id: 'robin', name: 'Robin', need: 20, color: '#f0e090', eye: 'o',
+      // eigene Kopfbedeckung: ersetzt den Hut der Marke
+      hat: ['      .-~~~-.', '   .-(   )   )-.', '  (   (    )   )', "   '-.       .-'",
+            '     | | | | |', '     |=======|'],
+      rows: ['     .~~~~~~~.', '   {/~~~~~~~~~\\', '  {|        {E}  |', '  {|           >',
+             '  {|        {M}|', '  { \\         /', "  {  '--. .--'", "    .---' '---.", '   /           \\']
+    },
+    {
+      id: 'mario', name: 'Mario', need: 25, color: '#ffd24a', eye: '*',
+      rows: ['     .--|||--.', '    /   |||   \\', '   |        {E}  |', '   |           >',
+             '   |        {M}|', '    \\         /', "     '--. .--'", "    .---'o'---.", '   /   \\_o_/   \\']
+    },
+    {
+      // Endgegner: brennende Krone, Narbe, Zornesfalte, Vollbart, Panzerschultern, Goldkette
+      id: 'jakob', name: 'JakobFuckingJones', need: 100000000, color: '#ff4a3a', eye: '0',
+      hatColor: '#ffd24a', flameRows: 2,
+      hatFrames: [['     )  (   )  (', '    ( ) )\\ ( ( )'], ['    (   )  (   )', '    ) ( (/ ) ) (']].map(f => [
+        ...f, '   /\\  /\\ /\\  /\\', '   | \\/  V  \\/ |', '   |*  <$$$>  *|', "   '==========='"]),
+      rows: ['     .#######.', '    /   ___\\\\ \\', '   | /     <{E}> |', '   |/          >',
+             '   |####### {M}|', '    \\#########/', "     '##. .##'", "  .=====' '=====.",
+             ' /   \\__$$$__/   \\']
+    }
+  ];
+  const fmtNeed = n => n >= 1e6 ? `${n / 1e6} Mio.` : `${n}`;
+
+  const sceneEl = document.getElementById('scene');
+  const charsEl = document.getElementById('chars');
+  const packEl = document.getElementById('pack');
+  const statusEl = document.getElementById('status');
+  const statsEl = document.getElementById('stats');
+  const brandsEl = document.getElementById('brands');
+
+  let brand = BRANDS[0];
+  const counts = Object.fromEntries(BRANDS.map(b => [b.id, FULL_PACK]));
+  // ---- Upgrades -----------------------------------------------------------
+  // cost = Grundpreis (steigt mit jedem Kauf, siehe priceOf). kps = Kippen pro Sekunde, die das Upgrade automatisch raucht.
+  const UPGRADES = [
+    // Balance: je teurer, desto schneller hat sich ein Upgrade bezahlt (200 s ganz unten, ~60 s ganz oben).
+    { id: 'bier',     name: 'Bier',                cost: 5,       fx: '+0,5x Rauchtempo' },
+    { id: 'glueck',   name: 'Glückskippe',         cost: 25,      fx: '+1 Kippe pro gerauchter Zigarette' },
+    { id: 'extra',    name: 'Abwechselnd rauchen', cost: 100,     kps: 0.5,   fx: 'Extra-Kippe: +0,5 Kippen/s' },
+    { id: 'hamster',  name: 'Hamster im Rauchrad', cost: 300,     kps: 1.6,   fx: '+1,6 Kippen/s' },
+    { id: 'tabak',    name: 'Tabakpackung',        cost: 500,     kps: 2.8,   fx: 'Selbstgedrehte: +2,8 Kippen/s' },
+    { id: 'raucher',  name: 'Extra-Raucher',       cost: 1000,    kps: 6,     fx: '+6 Kippen/s' },
+    { id: 'filter',   name: '100-Kippen-Filter',   cost: 2000,    fx: '+100 Kippen pro gerauchter Zigarette' },
+    { id: 'bande',    name: 'Bande Obdachloser',   cost: 2500,    kps: 16,    fx: 'sammeln Stummel: +16 Kippen/s' },
+    { id: 'maschine', name: 'Rauchmaschine',       cost: 5000,    kps: 35,    fx: '+35 Kippen/s' },
+    { id: 'slot',     name: 'Slotmachine',         cost: 7777,    fx: 'Spin alle 5 s, im Schnitt +58 Kippen/s' },
+    { id: 'manu',     name: 'Rauchermanufaktur',   cost: 10000,   kps: 80,    fx: '+80 Kippen/s' },
+    { id: 'oma',      name: 'Kettenrauchende Oma', cost: 15000,   kps: 122,   fx: '+122 Kippen/s' },
+    { id: 'traktor',  name: 'Traktor',             cost: 25000,   kps: 210,   fx: 'erntet Tabak: +210 Kippen/s' },
+    { id: 'schlot',   name: 'Fabrikschlot',        cost: 50000,   kps: 450,   fx: '+450 Kippen/s' },
+    { id: 'fabrik',   name: 'Zigarettenfabrik',    cost: 100000,  kps: 1000,  fx: '+1.000 Kippen/s' },
+    { id: 'zug',      name: 'Zug voller Kippen',   cost: 400000,  kps: 4400,  fx: '+4.400 Kippen/s' },
+    { id: 'rally',    name: 'Raucher-Rally-Auto',  cost: 1000000, kps: 12000, fx: '+12.000 Kippen/s' },
+    { id: 'reaktor',  name: 'Atomreaktor',         cost: 5000000, kps: 65000, fx: 'Kühltürme qualmen mit: +65.000 Kippen/s' },
+    { id: 'drache',   name: 'Qualmender Drache',   cost: 25000000,   kps: 350000,   fx: '+350.000 Kippen/s' },
+    { id: 'ufo',      name: 'Alien-Aschenbecher',  cost: 100000000,  kps: 1500000,  fx: '+1,5 Mio. Kippen/s' },
+    { id: 'vulkan',   name: 'Rauchender Vulkan',   cost: 1000000000, kps: 16000000, fx: '+16 Mio. Kippen/s' },
+    { id: 'onkel',    name: 'Rauchender Onkel',    cost: 200000,     kps: 2100,     fx: 'qualmt auf jeder Feier: +2.100 Kippen/s' },
+    { id: 'kneipe',   name: 'Raucherkneipe',       cost: 2500000,    kps: 31000,    fx: 'Stammtisch: +31.000 Kippen/s' },
+    { id: 'strand',   name: 'Strand-Müllhalde',    cost: 10000000,   kps: 135000,   fx: 'voll mit Kippen: +135.000 Kippen/s' },
+    { id: 'shisha',   name: 'Berufskolleg-Toilette', cost: 50000000, kps: 720000,   fx: 'heimlich rauchen: +720.000 Kippen/s' },
+    { id: 'plantage', name: 'Tabakplantage',       cost: 400000000,  kps: 6200000,  fx: '+6,2 Mio. Kippen/s' },
+    { id: 'tanker',   name: 'Kippen-Tanker',       cost: 5e9,        kps: 82e6,     fx: '+82 Mio. Kippen/s' },
+    { id: 'rakete',   name: 'Raucher-Rakete',      cost: 25e9,       kps: 420e6,    fx: '+420 Mio. Kippen/s' },
+    { id: 'mond',     name: 'Rauchender Mond',     cost: 100e9,      kps: 1.72e9,   fx: '+1,72 Mrd. Kippen/s' },
+    { id: 'galaxie',  name: 'Kippen-Galaxie',      cost: 500e9,      kps: 8.8e9,    fx: '+8,8 Mrd. Kippen/s' },
+    { id: 'urknall',  name: 'Urknall-Zigarre',     cost: 2.5e12,     kps: 45e9,     fx: '+45 Mrd. Kippen/s' }
+  ].sort((a, b) => a.cost - b.cost);
+  const owned = Object.fromEntries(UPGRADES.map(u => [u.id, 0]));
+  const perCig = () => 1 + owned.glueck + 100 * owned.filter;
+
+  // Slotmachine: 3 Walzen mit 4 Symbolen. Erwartungswert pro Spin und Automat ~314 Kippen.
+  const SLOT_SYMS = '7$#@', SLOT_EVERY = 60;   // Spin alle 60 Ticks (5,4 s)
+  const SLOT_AVG = (7777 / 64 + 2000 * 3 / 64 + 175 * 36 / 64) / (SLOT_EVERY * TICK / 1000);
+  let reels = ['7', '$', '#'], spinning = false;
+
+  // Übelkeit: alle 10 Minuten muss der Raucher kotzen. Arzt: kommt hin und wieder vorbei.
+  const PUKE_EVERY = 600000, PUKE_TICKS = 40, PUKE = '#8fbf3a';
+  let pukeT = 0, lastPuke = performance.now();
+  const DOC_STOP = 30;           // Spalte, an der der Arzt stehen bleibt
+  let doc = null, nextDoc = 400; // nextDoc in Loop-Ticks (erster Besuch nach ~35 s)
+  // Besucher: laufen, hüpfen, fahren oder fliegen ab und zu einmal durchs Bild.
+  // dir = Richtung (-1 nach links), speed = Spalten pro Tick, smoke = [Spalte, Zeile] im Bild, aus der Rauch kommt
+  const VISITORS = [
+    { id: 'automat', name: 'Zigarettenautomat', dir: -1, speed: 0.7, bonus: 250, color: '#e0483a', say: 'Ein Zigarettenautomat läuft vorbei. *klimper*',
+      frames: [[' .---.', ' |KIP|', ' |[=]|', " '---'", '  / \\'],
+               [' .---.', ' |KIP|', ' |[=]|', " '---'", '  | |']] },
+    { id: 'hoernchen', name: 'Eichhörnchen', dir: -1, speed: 1.2, bonus: 500, color: '#d08a4a', hop: true, smoke: [0, 1],
+      say: 'Ein Eichhörnchen hüpft vorbei und pafft.',
+      frames: [['      ,~~.', "*=('.')  )", '   (")(")/'],
+               ['      ,~~.', "*=('.')  )", '   (" )(" )/']] },
+    { id: 'auto', name: 'Auto', dir: 1, speed: 3, bonus: 1000, color: '#4a9bff', smoke: [0, 2], say: '*tuut tuut* Ein Auto rauscht durch.',
+      frames: [['     .---.', '  __/_|_|_\\__', "*=(o)----(o)-'"],
+               ['     .---.', '  __/_|_|_\\__', "*=(@)----(@)-'"]] },
+    { id: 'taube', name: 'Taube', dir: 1, speed: 1.5, bonus: 750, color: '#b8c8d8', sky: true, smoke: [5, 1],
+      say: 'Eine Taube fliegt mit Kippe im Schnabel vorbei.',
+      frames: [['  /^', '~(o>=*'], ['  __', '~(o>=*']] },
+    { id: 'aliens', name: 'UFO', dir: -1, speed: 1, bonus: 400, color: '#9be05a', sky: true, drop: true,
+      say: 'Aliens! Sie werfen Kippen ab - schnell anklicken!',
+      frames: [['    .-^-.', '  _/ o o \\_', ' (*_*_*_*_*)'], ['    .-^-.', '  _/ o o \\_', ' (_*_*_*_*_)']] }
+  ];
+  // Passiver Buff "Bürgergeld": ab 100.000 gerauchten Kippen schaut Merz vorbei (5.000 Kippen pro Klick)
+  const BUFF_NEED = 100000, DOC_BONUS = 100;
+  VISITORS.push({
+    id: 'merz', name: 'Merz', need: BUFF_NEED, dir: -1, speed: 0.8, bonus: 5000, color: '#d8d8d8',
+    say: 'Merz kommt vorbei und verteilt Bürgergeld. Anklicken!',
+    frames: [['  ___', ' (o_o)', ' /[€]\\', '  / \\'], ['  ___', ' (o_o)', ' /[€]\\', '  | |']]
+  });
+  let visitor = null, nextVisitor = 150;   // in Loop-Ticks (erster nach ~13 s)
+  // jeder Kauf macht das nächste Exemplar 15 % teurer
+  const PRICE_GROWTH = 1.15;
+  const priceOf = u => Math.ceil(u.cost * Math.pow(PRICE_GROWTH, owned[u.id]));
+  const kps = () => UPGRADES.reduce((sum, u) => sum + (u.kps || 0) * owned[u.id], 0);
+  const autoOn = () => UPGRADES.some(u => owned[u.id] > 0);
+
+  let smoked = 0;                // insgesamt geraucht (schaltet Charaktere frei)
+  let bank = 0;                  // ausgebbare Kippen
+  let pendingBrand = null;       // Markenwechsel, der bei der nächsten Kippe greift
+  let yieldMult = 1;
+  let char = CHARS[0];
+  // Prestige: ab dem Vulkan für 10 Mrd. Kippen. Kippen und Upgrades fangen neu an,
+  // Charaktere und Sorten bleiben. Jedes Prestige ist ein Zigaretten-Stern über der Figur.
+  const PRESTIGE_COST = 1e10, STAR_MAX = 8;
+  let prestige = 0;
+  // Kippen-Storys: je 250 Mrd. Kippen, bleiben auch nach einem Prestige.
+  // Wer alle hat, trägt den Titel "Der Kippen Allwissende".
+  const STORY_COST = 250e9, STORY_MAX = 10, STORY_TITLE = 'Der Kippen Allwissende';
+  let stories = 0;
+  let bossWins = 0;              // besiegte Bosse (bestimmt, welcher als nächster kommt)
+
+  // Fortschritt im Browser merken (funktioniert auch ohne Speicher)
+  const STORE = 'ascii-raucherpause';
+  try {
+    const s = JSON.parse(localStorage.getItem(STORE) || '{}');
+    if (typeof s.smoked === 'number' && s.smoked >= 0) smoked = s.smoked;
+    bank = (typeof s.bank === 'number' && s.bank >= 0) ? s.bank : smoked;
+    for (const u of UPGRADES)
+      if (s.owned && Number.isInteger(s.owned[u.id]) && s.owned[u.id] > 0) owned[u.id] = s.owned[u.id];
+    const c = CHARS.find(c => c.id === s.char);
+    if (c && c.need <= smoked) char = c;
+    if (Number.isInteger(s.prestige) && s.prestige > 0) prestige = s.prestige;
+    if (Number.isInteger(s.stories) && s.stories > 0) stories = Math.min(STORY_MAX, s.stories);
+    if (Number.isInteger(s.bossWins) && s.bossWins > 0) bossWins = s.bossWins;
+  } catch (e) {}
+  const save = () => {
+    try { localStorage.setItem(STORE, JSON.stringify({ smoked, bank, owned, char: char.id, prestige, stories, bossWins })); } catch (e) {}
+  };
+
+  let phase = 'idle', t = 0, cigLen = 0, tick = 0, ox = 0;
+  let particles = [];
+
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const esc = s => s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const center = (s, w = 15) => {
+    const l = Math.floor((w - s.length) / 2);
+    return ' '.repeat(l) + s + ' '.repeat(w - s.length - l);
+  };
+
+  let holdUntil = 0;
+  // hold > 0: Meldung bleibt so viele Millisekunden stehen
+  function setStatus(s, hold = 0) {
+    const now = performance.now();
+    if (hold) holdUntil = now + hold;
+    else if (now < holdUntil) return;
+    if (statusEl.textContent !== s) statusEl.textContent = s;
+  }
+
+  function addKippen(n) {
+    if (!(n > 0)) return;
+    const prev = smoked;
+    smoked += n; bank += n;
+    const un = CHARS.filter(c => c.need > prev && c.need <= smoked).pop();
+    if (un) {
+      char = un;
+      setStatus(`★ Freigespielt: ${un.name}! ★`, 3000);
+      renderChars(); save();
+    }
+    if (prev < BUFF_NEED && smoked >= BUFF_NEED)
+      setStatus('★ Passiver Buff freigeschaltet: Bürgergeld! Merz schaut jetzt vorbei. ★', 4000);
+    const ub = BRANDS.filter(b => b.need > prev && b.need <= smoked).pop();
+    if (ub) {
+      setStatus(ub.legend ? `★★★ LEGENDÄR: ${ub.name}! ★★★` : `★ Neue Sorte: ${ub.name}! ★`, 3000);
+      renderBrands();
+    }
+  }
+
+  // Selten greift er statt zur Zigarette zur Pfeife (kostet keine Kippe aus der Schachtel)
+  const PIPE_CHANCE = 0.04, PIPE_PUFFS = 6;
+  let pipe = false;
+
+  function startCig() {
+    pipe = Math.random() < PIPE_CHANCE;
+    if (pipe) {
+      cigLen = PIPE_PUFFS;
+    } else {
+      if (counts[brand.id] === 0) counts[brand.id] = FULL_PACK;
+      counts[brand.id]--;
+      cigLen = brand.len;
+    }
+    phase = 'light';
+    t = 0;
+    renderPack();
+  }
+
+  // ---- Markenauswahl & Schachtel ------------------------------------------
+  function renderBrands() {
+    brandsEl.innerHTML = '';
+    for (const b of BRANDS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const locked = (b.need || 0) > smoked;
+      const label = b.legend ? `★ ${b.name} ★` : b.name;
+      btn.textContent = locked ? `[x] ${label} · ${fmtNeed(b.need)}` : label;
+      if (locked) btn.title = `Ab ${fmtNeed(b.need)} gerauchten Zigaretten`;
+      btn.disabled = locked;
+      btn.style.setProperty('--c', b.frame);
+      btn.className = b === (pendingBrand || brand) ? 'active' : '';
+      btn.setAttribute('aria-pressed', b === brand);
+      btn.addEventListener('click', () => {
+        if ((b.need || 0) > smoked) return;
+        if (phase === 'idle') {
+          if (b === brand) return;
+          brand = b; pendingBrand = null;
+          setStatus(b.say.idle, 1500);
+        } else {
+          pendingBrand = b === brand ? null : b;
+          if (pendingBrand) setStatus(`Nächste Kippe: ${b.name}`, 1500);
+        }
+        renderBrands(); renderPack(); draw();
+      });
+      brandsEl.appendChild(btn);
+    }
+    renderChars();
+  }
+
+  function renderChars() {
+    charsEl.innerHTML = '';
+    for (const c of CHARS) {
+      const locked = smoked < c.need;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = locked ? `[x] ${c.name} · ${fmtNeed(c.need)}` : c.name;
+      btn.title = locked ? `Ab ${fmtNeed(c.need)} gerauchten Zigaretten` : c.name;
+      btn.style.setProperty('--c', c.color || '#b8c4a6');
+      btn.className = c === char ? 'active' : '';
+      btn.setAttribute('aria-pressed', c === char);
+      btn.disabled = locked;
+      btn.addEventListener('click', () => {
+        if (c === char || smoked < c.need) return;
+        char = c;
+        save();
+        setStatus(`${c.name} ist dran.`, 1500);
+        renderChars(); draw();
+      });
+      charsEl.appendChild(btn);
+    }
+  }
+
+  function renderPack() {
+    const pack = counts[brand.id];
+    const tops = pack > 0 ? '|| || || || ||' : '              ';
+    const countLine = center(pack > 0 ? `${pack} Stück` : 'leer');
+    // Flammen-Schachtel: Bild und Rahmen flackern (wird dafür laufend neu gezeichnet)
+    const fl = Math.floor(performance.now() / 180);
+    const art = (brand.artFrames ? brand.artFrames[fl % brand.artFrames.length] : brand.art).map((a, i) =>
+      ` |<b style="color:${brand.fire && i % 2 === 0 ? ((i / 2 + fl) % 2 ? HOT : EMBER) : brand.accent}">${esc(center(a))}</b>| |`);
+    packEl.style.color = brand.fire && fl % 2 ? EMBER : brand.frame;
+    packEl.innerHTML = '<pre>' + [
+      '   _______________',
+      `  /${tops}/|`,
+      ' +---------------+ |',
+      ...art,
+      ` |${countLine}| |`,
+      ' | Rauchen ist   | |',
+      ' | tödlich.      |/',
+      ' +---------------+'
+    ].join('\n') + '</pre>';
+    packEl.disabled = phase !== 'idle';
+  }
+
+  // ---- Figur --------------------------------------------------------------
+  function face() {
+    const closed = phase === 'drag' || phase === 'hold' || phase === 'cough';
+    let mouth = '---';
+    if (phase === 'exhale') mouth = brand.exhale === 'rings' ? '--O' : '--o';
+    if (phase === 'hold') mouth = '--=';
+    if (phase === 'cough') mouth = t % 2 ? '--O' : '--o';
+    let eye = closed ? '-' : char.eye;
+    if (pukeT > 0) { eye = 'x'; mouth = pukeT % 2 ? '--O' : '--0'; }
+    const rows = char.rows.map(r => r.replace('{E}', eye).replace('{M}', mouth));
+    // Sonnenbrille der Marke über die Augenpartie legen
+    if (brand.shades) rows[2] = rows[2].slice(0, 10) + '--##' + rows[2].slice(14);
+    return rows;
+  }
+
+  // kleine Helfer rechts in der Szene
+  const HELP_X0 = 44;            // Spalte des ersten Helfers
+  // Wie viele Exemplare eines Upgrades zu sehen sind: bis `lin` jedes einzeln,
+  // danach langsamer, nach `span` Zehnerpotenzen ist bei `max` Schluss.
+  const scaled = (n, lin, max, span) =>
+    n <= lin ? n : Math.min(max, Math.floor(lin + (max - lin) * Math.log10(n / lin) / span));
+  const helperCount = h => scaled(owned[h.id], 4, 5, 2);
+  // Helfer stehen in zwei Etagen zu je HELP_COLS Plätzen; y = unterste Zeile des ersten Exemplars
+  // (drei Etagen, je TIER_H Zeilen hoch: Platz für 5 Exemplare übereinander plus Boden)
+  const HELP_COLS = 9, TIER_H = 11;
+  const helperPos = i => ({ x: HELP_X0 + (i % HELP_COLS) * 7, y: H - 1 - TIER_H * Math.floor(i / HELP_COLS) });
+  const extraCount = () => scaled(owned.extra, 4, 8, 2);
+  const EXTRA_ROWS = [2, 1, -2, -3, -4, -5, -6, -7];   // Zeilen der Extra-Kippen relativ zum Mund
+  // abwechselnd: jede zweite Extra-Kippe glüht im Gegentakt
+  const extraGlow = k => (phase === 'rest') !== (k % 2 === 1);
+  // Bier: lose Flaschen vorne, je 10 ein Kasten. Ab 10 Kästen wächst der Stapel langsamer.
+  const BEER_X = 19, CRATE_X = 29, CRATE_MAX = 24;
+  const cratesFor = n => n < 100 ? Math.floor(n / 10) : Math.min(CRATE_MAX, Math.floor(10 + 7 * Math.log10(n / 100)));
+  const HELPERS = [
+    // sx = Spalten, aus denen Rauch aufsteigt; so = Zeile dazu relativ zur Oberkante (Standard -1)
+    // untere Etage
+    { id: 'hamster',  color: '#e0b070', art: [" c'.'=*", ' (")(")'],     sx: [6] },
+    { id: 'tabak',    color: '#b98a55', art: [' .---.', ' |TBK|'],       sx: [3] },
+    { id: 'raucher',  color: '#b8c4a6', art: [' (oo)=*', ' /||\\'],      sx: [6] },
+    { id: 'bande',    color: '#9aa390', art: [' oOo=*', ' /|||\\'],      sx: [5] },
+    { id: 'maschine', color: '#8fa3b5', art: [' [%%]=*', ' /__\\'],      sx: [6] },
+    { id: 'slot',     color: '#ffd24a', art: [' .---.', ' |777|o'] },
+    { id: 'manu',     color: '#c9a36b', art: ['  /^\\ i', ' |[]|_|'],    sx: [6] },
+    { id: 'oma',      color: '#deb0ea', art: [' .@@.', ' (oo)=*'],       sx: [6], so: 0 },
+    { id: 'traktor',  color: '#5fd05f', art: [' i_[]_', ' (O)=o'],       sx: [1] },
+    // obere Etage
+    { id: 'schlot',   color: '#c96b4a', art: ['  |=|', '  | |'],         sx: [3] },
+    { id: 'fabrik',   color: '#a0a0a0', art: [' i_i_i', ' |HHH|'],       sx: [1, 3, 5] },
+    { id: 'zug',      color: '#8fa3b5', art: ['  i__n_', ' [oo-oo'],     sx: [2] },
+    { id: 'rally',    color: '#e0483a', art: ['  _/T\\_', '*=O--O'],     sx: [0], so: 0 },
+    { id: 'reaktor',  color: '#9be05a', art: [' \\_/\\_/', ' /_\\/_\\'],  sx: [2, 5] },
+    { id: 'drache',   color: '#ff8a2a', art: [' /^^^\\', ' <oo>=*'],     sx: [6], so: 0 },
+    { id: 'ufo',      color: '#9ad0ff', art: [' _.-._', ' (ooo)*'],      sx: [6], so: 0 },
+    { id: 'vulkan',   color: '#b0603a', art: ['  \\*/', ' /^^^\\'],      sx: [3] },
+    { id: 'onkel',    color: '#f0c090', art: [' ,===,', ' (-.-)*'],      sx: [6], so: 0 },
+    // dritte Etage
+    { id: 'kneipe',   color: '#c9a36b', art: [' _/^\\_', ' |PUB|'],      sx: [3] },
+    { id: 'strand',   color: '#e0c98a', art: [' =#=#=', ' ~~~~~~'],      sx: [3] },
+    { id: 'shisha',   color: '#3fbfbf', art: [' [WC]', ' (__)D'],        sx: [3] },   // Berufskolleg-Toilette
+    { id: 'plantage', color: '#5fd05f', art: [' wWwWw', ' |||||'],       sx: [3] },
+    { id: 'tanker',   color: '#8fa3b5', art: ['  _i|_', ' \\____/'],     sx: [3] },
+    { id: 'rakete',   color: '#e8e4dc', art: ['  /A\\', ' /|=|\\'],      sx: [3] },
+    { id: 'mond',     color: '#d8d8c0', art: [' .-"-.', ' ( o )*'],      sx: [6], so: 0 },
+    { id: 'galaxie',  color: '#b48cff', art: [' .*°*.', " '*.*'"],       sx: [3] },
+    { id: 'urknall',  color: '#ffffff', art: ['  \\|/', ' -=@=-'],       sx: [3] }
+  ];
+
+  // ---- Kippenberg ---------------------------------------------------------
+  // Rechts in der Szene. Bis 30 Kippen ist jeder Stummel ein Zeichen, danach wächst der Berg langsamer.
+  const PILE_W = 19, PILE_X0 = W - PILE_W, PILE_MAX_H = 20, PILE_MAX = 180;
+  const pile = new Array(PILE_W).fill(0);
+  let pileCount = 0;
+  const cellsFor = n => n <= 30 ? Math.floor(n) : Math.min(PILE_MAX, Math.floor(30 + 21 * Math.log10(n / 30)));
+  const pileH = i => (i < 0 || i >= PILE_W) ? Infinity : pile[i];
+
+  // Spalte, in der ein Stummel liegen bleibt: landet nahe der Mitte und rollt den Hang hinunter
+  function pickColumn() {
+    let i = Math.round((PILE_W - 1) / 2 + rnd(-2, 2) + rnd(-2, 2));
+    for (let guard = 0; guard < 60; guard++) {
+      const h = pile[i], l = pileH(i - 1), r = pileH(i + 1);
+      const canL = h - l >= 2, canR = h - r >= 2;
+      if (canL && canR) i += Math.random() < 0.5 ? -1 : 1;
+      else if (canL) i -= 1;
+      else if (canR) i += 1;
+      else if (h >= PILE_MAX_H) i += l <= r ? -1 : 1;
+      else break;
+    }
+    return i;
+  }
+
+  function addPileCell(i) {
+    if (pile[i] >= PILE_MAX_H) i = pickColumn();
+    pile[i]++; pileCount++;
+  }
+
+  function syncPile() {
+    const target = cellsFor(smoked);
+    while (pileCount < target) addPileCell(pickColumn());
+  }
+
+  function resetPile() { pile.fill(0); pileCount = 0; shiny = null; }
+
+  // Shiny-Kippe: glitzert ab und zu ~20 s lang oben auf dem Berg; anklicken gibt 500 Kippen
+  const SHINY_BONUS = 500, SHINY_TICKS = 220, SHINY_COLORS = ['#ffffff', '#ffd24a', '#9ad0ff', '#ff9ec8'];
+  let shiny = null, nextShiny = 330;   // in Loop-Ticks (erste nach ~30 s)
+  const shinyPos = () => ({ x: PILE_X0 + shiny.col, y: H - pile[shiny.col] });
+
+  function shinyTick() {
+    if (!shiny) {
+      if (loopTick < nextShiny) return;
+      const cols = [];
+      for (let i = 1; i < PILE_W - 1; i++) if (pile[i] > 0) cols.push(i);
+      if (!cols.length) return;
+      shiny = { col: cols[Math.floor(Math.random() * cols.length)], life: SHINY_TICKS };
+      setStatus('Im Kippenberg glitzert etwas ...', 2500);
+      return;
+    }
+    const { x, y } = shinyPos();
+    if (loopTick % 4 === 0) spawn(x + rnd(-2, 2), y - rnd(0.5, 2), rnd(-0.1, 0.1), rnd(-0.25, -0.1), rnd(5, 9), 'spark');
+    if (--shiny.life <= 0) endShiny();
+  }
+
+  function endShiny() {
+    shiny = null;
+    nextShiny = loopTick + Math.floor(rnd(500, 1700));   // nächste in ~45 s bis 2,5 min
+  }
+
+  function collectShiny() {
+    if (!shiny) return;
+    const { x, y } = shinyPos();
+    for (let i = 0; i < 14; i++) spawn(x, y, rnd(-1.2, 1.2), rnd(-0.9, 0.1), rnd(8, 16), 'spark');
+    endShiny();
+    const bonus = SHINY_BONUS * Math.pow(2, prestige);   // jedes Prestige verdoppelt
+    addKippen(bonus);
+    setStatus(`★ Shiny-Kippe! +${fmt(bonus)} Kippen ★`, 2500);
+    save();
+    renderHud();
+  }
+  // Alien-Kippen: fallen aus dem UFO, bleiben ~10 s am Boden liegen; anklicken gibt 500 Kippen
+  const DROP_BONUS = 500, DROP_FALL = 0.35, DROP_REST = 110, ALIEN = '#9be05a';
+  let drops = [];
+
+  function dropTick() {
+    for (const d of drops) {
+      if (d.y < H - 1) d.y = Math.min(H - 1, d.y + DROP_FALL);
+      else d.life--;
+    }
+    drops = drops.filter(d => d.life > 0);
+  }
+
+  function collectDrop(i) {
+    const d = drops[i];
+    if (!d) return;
+    drops.splice(i, 1);
+    for (let k = 0; k < 10; k++) spawn(d.x, d.y, rnd(-1.2, 1.2), rnd(-0.9, 0.1), rnd(8, 16), 'spark', { color: ALIEN, front: true });
+    const bonus = DROP_BONUS * Math.pow(2, prestige);    // jedes Prestige verdoppelt
+    addKippen(bonus);
+    setStatus(`👽 Alien-Kippe! +${fmt(bonus)} Kippen`, 2000);
+    save();
+    renderHud();
+  }
+
+  // pointerdown statt click: die Szene wird alle 90 ms neu aufgebaut
+  sceneEl.addEventListener('pointerdown', e => {
+    if (!e.target.closest) return;
+    const drop = e.target.closest('.drop');
+    if (drop) collectDrop(+drop.dataset.i);
+    else if (e.target.closest('.shiny')) collectShiny();
+    else collectGuest(guestAt(e));
+  });
+  sceneEl.addEventListener('pointermove', e => { sceneEl.style.cursor = guestAt(e) ? 'pointer' : ''; });
+
+  // Besucher und Arzt: jeder Klick gibt Kippen (bonus je Besucher, 100 bis 1.000; Merz 5.000)
+  // Zelle der Szene unter dem Mauszeiger
+  function cellAt(e) {
+    const r = sceneEl.getBoundingClientRect(), cs = getComputedStyle(sceneEl);
+    const left = parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+    const top = parseFloat(cs.borderTopWidth) + parseFloat(cs.paddingTop);
+    return {
+      x: (e.clientX - r.left - left) / ((r.width - 2 * left) / W),
+      y: (e.clientY - r.top - top) / ((r.height - 2 * top) / H)
+    };
+  }
+  // noch nicht angeklickter Gast unter dem Mauszeiger (mit einer Zelle Rand zum leichteren Treffen)
+  function guestAt(e) {
+    const c = cellAt(e);
+    if (visitor) {
+      const rows = visitor.v.frames[0].length;
+      if (c.x >= visitor.x - 1 && c.x <= visitor.x + visitor.w + 1
+        && c.y >= visitor.y - rows - 1 && c.y <= visitor.y + 2)
+        return { name: visitor.v.name, bonus: visitor.v.bonus, x: visitor.x + visitor.w / 2, y: visitor.y - 1 };
+    }
+    if (doc && c.x >= doc.x - 1 && c.x <= doc.x + 8 && c.y >= H - 5)
+      return { name: 'Arzt', bonus: DOC_BONUS, x: doc.x + 3, y: H - 3 };
+    return null;
+  }
+  function collectGuest(hit) {
+    if (!hit) return;
+    for (let k = 0; k < 6; k++)
+      spawn(hit.x, hit.y, rnd(-1.2, 1.2), rnd(-0.9, 0.1), rnd(8, 16), 'spark', { color: HOT, front: true });
+    // jedes Prestige verdoppelt die Klick-Belohnung der Besucher
+    const bonus = hit.bonus * Math.pow(2, prestige);
+    addKippen(bonus);
+    setStatus(`${hit.name} erwischt! +${fmt(bonus)} Kippen` + (prestige ? ` (x${fmt(Math.pow(2, prestige))} Prestige)` : ''), 2000);
+    save();
+    renderHud();
+  }
+
+  // Stummel fliegt im Bogen von (x0, y0) auf den Berg
+  function throwButt(x0, y0) {
+    const col = pickColumn(), T = 14, g = 0.1;
+    const tx = PILE_X0 + col, ty = H - 1 - pile[col];
+    particles.push({ x: x0, y: y0, vx: (tx - x0) / T, vy: (ty - y0) / T - g * T / 2, life: T, max: T, kind: 'butt', col });
+  }
+
+  function pileTick() {
+    // bei hohem Einkommen wächst der Berg auch ohne einzelne Würfe nach
+    if (pileCount < cellsFor(smoked) - 4) addPileCell(pickColumn());
+    // die Helfer werfen ihre Stummel dazu
+    if (loopTick % 7 === 0) {
+      const hs = HELPERS.map((h, i) => i).filter(i => owned[HELPERS[i].id]);
+      if (hs.length) {
+        const p = helperPos(hs[Math.floor(Math.random() * hs.length)]);
+        throwButt(p.x + 3, p.y - 2);
+      }
+    }
+    // der Gipfel qualmt noch ein bisschen
+    if (pileCount > 0 && loopTick % 9 === 0) {
+      let k = 0;
+      for (let i = 1; i < PILE_W; i++) if (pile[i] > pile[k]) k = i;
+      spawn(PILE_X0 + k, H - 1 - pile[k], rnd(-0.1, 0.1), rnd(-0.3, -0.2), rnd(10, 18));
+    }
+  }
+
+  // o = Extras für besondere Partikel (Zeichen, Farbe, Schwerkraft, Umlaufbahn ...)
+  function spawn(x, y, vx, vy, life, kind = 'smoke', o) {
+    particles.push({ x, y, vx, vy, life, max: life, kind, ...o });
+  }
+
+  const tipX = () => pipe ? CIG_X + 5.5 : CIG_X + brand.filter.length + cigLen;
+
+  function doExhale() {
+    const mx = CIG_X + 1, my = MOUTH_ROW - 0.5;
+    switch (brand.exhale) {
+      case 'frost':
+        for (let i = 0; i < 3; i++) spawn(mx, my + rnd(-0.3, 0.3), rnd(1.3, 2.4), rnd(-0.25, 0.05), rnd(30, 55));
+        if (t % 2 === 0) spawn(mx + rnd(2, 10), my + rnd(-2, 1), rnd(0.3, 0.8), rnd(-0.15, 0.05), rnd(10, 18), 'spark');
+        break;
+      case 'rings':
+        if (t === 1 || t === 5 || t === 9) spawn(mx + 1, my, 0.75, -0.04, 48, 'ring');
+        break;
+      case 'cloud':
+        for (let i = 0; i < 4; i++) spawn(mx + rnd(0, 1), my, rnd(0.1, 0.6), rnd(-0.9, -0.45), rnd(50, 85));
+        break;
+      case 'cough':
+        for (let i = 0; i < 4; i++) spawn(mx, my + rnd(-0.4, 0.4), rnd(0.6, 1.3), rnd(-0.5, 0), rnd(30, 55));
+        break;
+      case 'hearts':   // Herzchen steigen schaukelnd auf
+        spawn(mx, my, rnd(0.2, 0.5), rnd(-0.3, -0.1), rnd(20, 35));
+        if (t % 2 === 0)
+          spawn(mx + 1, my, rnd(0.5, 1.2), rnd(-0.4, -0.1), rnd(40, 60), 'glyph', { chars: '♥', wob: 0.3 });
+        break;
+      case 'stars':    // funkelnder Sternenstaub in mehreren Farben
+        for (let i = 0; i < 3; i++)
+          spawn(mx, my + rnd(-0.4, 0.4), rnd(0.6, 1.7), rnd(-0.55, 0.05), rnd(30, 60), 'glyph',
+            { chars: '*+.+', rate: 3, color: STARS[Math.floor(Math.random() * STARS.length)] });
+        break;
+      case 'rainbow':  // sechs Farbbänder fächern sich zu einem Bogen auf
+        RAINBOW.forEach((color, i) =>
+          spawn(mx, my, 1.25, -0.25 - i * 0.06, 62, 'glyph', { chars: '=', color, g: 0.012, dragF: 1 }));
+        break;
+      case 'skulls':   // Totenköpfe, die beim Davonschweben wachsen
+        spawn(mx, my + rnd(-0.3, 0.3), rnd(0.4, 1), rnd(-0.4, -0.1), rnd(20, 40));
+        if (t === 1 || t === 6) spawn(mx + 1, my, 0.65, -0.07, 56, 'skull');
+        break;
+      case 'storm':    // Gewitterwolke, aus der Blitze zucken
+        for (let i = 0; i < 3; i++) spawn(mx, my + rnd(-0.3, 0.3), rnd(0.5, 1.5), rnd(-0.55, -0.2), rnd(45, 75));
+        if (t > 3 && t % 3 === 0) spawn(mx + rnd(5, 24), my - rnd(4, 8), 0, 0, 5, 'bolt');
+        break;
+      case 'bubbles':  // schillernde Blasen, die wachsen und zerplatzen
+        for (let i = 0; i < 2; i++)
+          spawn(mx, my + rnd(-0.3, 0.3), rnd(0.4, 1.5), rnd(-0.45, -0.1), rnd(35, 70), 'bubble',
+            { color: BUBBLES[Math.floor(Math.random() * BUBBLES.length)] });
+        break;
+      case 'notes':    // bunte Noten schaukeln davon
+        spawn(mx, my, rnd(0.2, 0.5), rnd(-0.3, -0.1), rnd(20, 35));
+        spawn(mx + 1, my, rnd(0.5, 1.3), rnd(-0.45, -0.1), rnd(40, 65), 'glyph',
+          { chars: '♪♫', rate: 6, wob: 0.35, color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
+        break;
+      case 'fireworks': // Raketen steigen auf und zerplatzen in bunten Sternen
+        spawn(mx, my + rnd(-0.3, 0.3), rnd(0.4, 1), rnd(-0.4, -0.1), rnd(20, 35));
+        if (t === 1 || t === 5 || t === 9)
+          spawn(mx + 1, my, rnd(0.9, 1.7), rnd(-0.8, -0.4), rnd(12, 18), 'rocket',
+            { color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
+        break;
+      case 'ghosts':   // Gespenster schweben nach oben und werden größer
+        spawn(mx, my + rnd(-0.3, 0.3), rnd(0.4, 1), rnd(-0.4, -0.1), rnd(20, 40));
+        if (t === 1 || t === 6) spawn(mx + 1, my, 0.6, -0.13, 60, 'ghost');
+        break;
+      case 'matrix':   // Code strömt aus dem Mund und regnet in Spalten herab
+        spawn(mx, my, rnd(1, 2), rnd(-0.5, -0.1), rnd(10, 20), 'glyph', { chars: '01', rate: 2, color: '#3fdf5f' });
+        for (let i = 0; i < 3; i++)
+          spawn(mx + rnd(0, 32), my - rnd(3, 13), 0, rnd(0.35, 0.7), rnd(15, 30), 'glyph',
+            { chars: '01', rate: 2, dragF: 1, color: Math.random() < 0.2 ? '#d8ffd8' : '#3fdf5f' });
+        break;
+      case 'fire':     // Flammenwerfer
+        for (let i = 0; i < 5; i++)
+          spawn(mx, my + rnd(-0.4, 0.4), rnd(1.2, 2.8), rnd(-0.3, 0.15), rnd(14, 30), 'glyph', { chars: '#*^"', rate: 2 });
+        break;
+      case 'galaxy': { // zwei Spiralarme kreisen um ein langsam wanderndes Zentrum
+        const o = { chars: '*+.:', rate: 5, cx: mx + 12 + 0.2 * t, cy: my - 6 - 0.04 * t, r: 0, w: 0.11 };
+        spawn(mx, my, 0, 0, 80, 'glyph', { ...o, ang: t * 0.45 });
+        spawn(mx, my, 0, 0, 80, 'glyph', { ...o, ang: t * 0.45 + Math.PI });
+        if (t % 4 === 0) spawn(mx, my, 0, 0, 80, 'glyph', { ...o, ang: rnd(0, 6.3), color: '#ffffff' });
+        break;
+      }
+      default:
+        for (let i = 0; i < 3; i++) spawn(mx, my + rnd(-0.4, 0.4), rnd(0.7, 1.5), rnd(-0.45, -0.05), rnd(25, 50));
+    }
+  }
+
+  function step() {
+    tick++; t++;
+    ox = 0;
+    const lit = ['rest', 'drag', 'hold', 'exhale', 'cough'].includes(phase);
+
+    // dünner Rauchfaden von der Glut
+    if (lit && tick % 3 === 0)
+      spawn(tipX() + rnd(-0.2, 0.2), MOUTH_ROW - (pipe ? 2 : 1), rnd(-0.12, 0.18), rnd(-0.4, -0.25), rnd(22, 38));
+
+    switch (phase) {
+      case 'light':
+        setStatus(pipe ? 'Heute mal Pfeife. *stopf* ... *ratsch*'
+          : brand.lighter === 'match' ? '*ratsch*' : '*klick* ... *klick* ...');
+        if (t > 12) { phase = 'rest'; t = 0; }
+        break;
+      case 'rest':
+        setStatus('...');
+        if (t > brand.rest) { phase = 'drag'; t = 0; }
+        break;
+      case 'drag':
+        setStatus(pipe ? '*pafft genüsslich*' : brand.say.drag);
+        if (t > brand.drag) { cigLen--; phase = 'hold'; t = 0; }
+        break;
+      case 'hold':
+        if (t > 4) { phase = 'exhale'; t = 0; }
+        break;
+      case 'exhale': {
+        setStatus(brand.say.exhale);
+        doExhale();
+        const dur = brand.exDur || (brand.exhale === 'cloud' ? 14 : brand.exhale === 'frost' ? 12 : 10);
+        if (t > dur) {
+          const firstDrag = !pipe && cigLen === brand.len - 1;
+          phase = (brand.exhale === 'cough' && firstDrag) ? 'cough' : cigLen <= 0 ? 'done' : 'rest';
+          t = 0;
+        }
+        break;
+      }
+      case 'cough':
+        setStatus('*hust* *hust* ... stark.');
+        ox = t % 2;
+        if (t % 3 === 0)
+          for (let i = 0; i < 5; i++) spawn(CIG_X + 1, MOUTH_ROW - 0.5, rnd(0.8, 1.8), rnd(-0.6, 0.2), rnd(15, 30));
+        if (t > 12) { phase = cigLen <= 0 ? 'done' : 'rest'; t = 0; }
+        break;
+      case 'done':
+        setStatus(pipe ? 'Pfeife ausgeklopft.' : 'Aufgeraucht.');
+        if (t > 14) {
+          phase = 'idle'; t = 0; pipe = false;
+          if (pendingBrand) { brand = pendingBrand; pendingBrand = null; }
+          setStatus(counts[brand.id] > 0 ? 'Noch eine?' : 'Schachtel leer.');
+          addKippen(perCig() * yieldMult);
+          throwButt(CIG_X + ox, MOUTH_ROW);
+          save();
+          renderBrands(); renderPack();
+        }
+        break;
+    }
+
+    for (const p of particles) {
+      if (p.kind === 'butt') {
+        p.x += p.vx; p.y += p.vy; p.vy += 0.1;
+        if (p.life <= 1 && pileCount < cellsFor(smoked)) addPileCell(p.col);
+      } else if (p.kind === 'rocket') {
+        p.x += p.vx; p.y += p.vy;
+        if (p.life <= 1)   // Rakete zerplatzt
+          for (let k = 0; k < 14; k++) {
+            const ang = k / 14 * Math.PI * 2, v = rnd(0.7, 1);
+            spawn(p.x, p.y, Math.cos(ang) * 1.5 * v, Math.sin(ang) * 0.75 * v, rnd(10, 18), 'glyph',
+              { chars: '*+.', rate: 5, color: p.color, g: 0.02, dragF: 0.92 });
+          }
+      } else if (p.kind === 'ring' || p.kind === 'skull' || p.kind === 'ghost') {
+        p.x += p.vx; p.y += p.vy; p.vx *= 0.975;
+      } else if (p.kind === 'bolt') {
+        // Blitze stehen still und verlöschen
+      } else if (p.kind === 'glyph') {
+        if (p.cx !== undefined) {
+          // Umlaufbahn: Radius wächst, Zentrum driftet (x doppelt, weil Zeichen höher als breit sind)
+          p.cx += 0.2; p.cy -= 0.04;
+          p.ang += p.w; p.r += 0.075;
+          p.x = p.cx + Math.cos(p.ang) * p.r * 2;
+          p.y = p.cy + Math.sin(p.ang) * p.r;
+        } else {
+          p.x += p.vx + (p.wob ? Math.sin(p.life * 0.4) * p.wob : 0);
+          p.y += p.vy;
+          p.vy += p.g || 0;
+          p.vx *= p.dragF ?? 0.97;
+        }
+      } else if (p.kind === 'puke') {
+        // fällt im Bogen und bleibt als Pfütze am Boden liegen
+        p.x += p.vx; p.y += p.vy; p.vy += 0.12;
+        if (p.y >= H - 1) { p.y = H - 1; p.vx = 0; p.vy = 0; }
+      } else {
+        p.x += p.vx + rnd(-0.15, 0.15);
+        p.y += p.vy;
+        p.vx *= 0.94;
+        if (p.kind === 'smoke') p.vy = Math.max(p.vy - 0.004, -0.9);
+      }
+      p.life--;
+    }
+    particles = particles.filter(p => p.life > 0 && p.y >= -1 && p.x >= 0 && p.x < W);
+  }
+
+  function draw() {
+    const ch = Array.from({ length: H }, () => Array(W).fill(' '));
+    const cl = Array.from({ length: H }, () => Array(W).fill(''));
+    const put = (x, y, s, c = '') => {
+      for (let i = 0; i < s.length; i++) {
+        const xx = x + i;
+        if (y >= 0 && y < H && xx >= 0 && xx < W && s[i] !== ' ') { ch[y][xx] = s[i]; cl[y][xx] = c; }
+      }
+    };
+
+    // Rauch (Partikel mit front = true kommen erst später, vor Bier und Helfer)
+    const drawP = p => {
+      const a = p.life / p.max;
+      const c = brand.smoke[a > 0.66 ? 0 : a > 0.33 ? 1 : 2];
+      const x = Math.round(p.x), y = Math.round(p.y);
+      if (p.kind === 'butt') {
+        put(x, y, '=', '#cfc6b0');
+      } else if (p.kind === 'ring') {
+        if (a > 0.8) put(x, y, 'o', c);
+        else if (a > 0.55) put(x, y, '()', c);
+        else { put(x, y - 1, '.-.', c); put(x - 1, y, '(   )', c); put(x, y + 1, "'-'", c); }
+      } else if (p.kind === 'glyph') {
+        put(x, y, p.chars[Math.floor(p.life / (p.rate || 4)) % p.chars.length], p.color || c);
+      } else if (p.kind === 'skull') {
+        if (a > 0.85) put(x, y, 'o', c);
+        else if (a > 0.65) put(x, y, '(xx)', c);
+        else { put(x, y - 1, '.-"-.', c); put(x, y, '(x x)', c); put(x + 1, y + 1, '|=|', c); }
+      } else if (p.kind === 'bolt') {
+        const bc = p.life % 2 ? '#ffffff' : HOT;
+        for (let k = 0; k < 5; k++) put(x + (k % 2), y + k, k % 2 ? '\\' : '/', bc);
+      } else if (p.kind === 'puke') {
+        put(x, y, y >= H - 1 ? '~' : 'o%:,'[(x + y) % 4], PUKE);
+      } else if (p.kind === 'bubble') {
+        if (a > 0.7) put(x, y, 'o', p.color);
+        else if (a > 0.4) put(x, y, 'O', p.color);
+        else if (a > 0.1) put(x, y, '( )', p.color);
+        else put(x, y, "'*'", '#ffffff');
+      } else if (p.kind === 'rocket') {
+        put(x, y, '^', HOT); put(x, y + 1, "'", EMBER);
+      } else if (p.kind === 'ghost') {
+        if (a > 0.85) put(x, y, 'o', c);
+        else if (a > 0.65) put(x, y, '(oo)', c);
+        else {
+          put(x + 1, y - 1, '.-.', c); put(x, y, '(o o)', c);
+          put(x, y + 1, Math.floor(p.life / 3) % 2 ? '|/\\/|' : '|\\/\\|', c);
+        }
+      } else if (p.kind === 'spark') {
+        put(x, y, a > 0.5 ? '*' : '+', p.color || '#ffffff');
+      } else {
+        const set = a > 0.66 ? 'oO()' : a > 0.33 ? '~S°)' : ".'`:";
+        put(x, y, set[(Math.floor(p.x * 3 + p.y) % 4 + 4) % 4], p.color || c);
+      }
+    };
+    // Bier steht ganz hinten: Rauch und Ausatem-Animationen ziehen davor vorbei
+    if (owned.bier) {
+      const loose = owned.bier % 10, crates = cratesFor(owned.bier);
+      for (let i = 0; i < loose; i++) {
+        put(BEER_X + i, H - 2, 'i', '#b5762a');
+        put(BEER_X + i, H - 1, 'U', '#e8b83a');
+      }
+      for (let k = 0; k < crates; k++) {
+        const x = CRATE_X + (k % 2) * 7, y = H - 1 - 2 * Math.floor(k / 2);
+        put(x, y - 1, '|iiii|', '#e0483a');
+        put(x + 1, y - 1, 'iiii', '#e8b83a');
+        put(x, y, '|BIER|', '#e0483a');
+        put(x + 1, y, 'BIER', '#f1ead8');
+      }
+    }
+    for (const p of particles) if (!p.front) drawP(p);
+
+    // Kippenberg
+    for (let i = 0; i < PILE_W; i++)
+      for (let k = 0; k < pile[i]; k++) {
+        const v = (i * 7 + k * 13) % 6;
+        put(PILE_X0 + i, H - 1 - k, '=#=~=-'[v], v === 1 ? '#c98f4e' : v === 3 ? '#8a8474' : '#cfc6b0');
+      }
+
+    // Figur (mit Kopfbedeckung)
+    const flick = Math.floor(performance.now() / 180);
+    const ownHat = char.hatFrames ? char.hatFrames[flick % char.hatFrames.length] : char.hat;
+    const brandHat = brand.hatFrames ? brand.hatFrames[flick % brand.hatFrames.length] : brand.hat;
+    const hat = ownHat || brandHat;
+    if (hat) hat.forEach((l, i) => put(ox, BASE - hat.length + i, l,
+      !ownHat ? (brand.fire ? ((i + flick) % 2 ? HOT : EMBER) : brand.frame)
+        : i < (char.flameRows || 0) ? ((i + flick) % 2 ? HOT : EMBER)   // Flammen flackern
+        : char.hatColor || '#ffffff'));
+    face().forEach((l, i) => put(ox, BASE + i, l, char.color));
+
+    // Prestige-Sterne aus Zigaretten über dem Kopf (ab dem neunten nur noch als Zahl)
+    for (let k = 0, n = Math.min(prestige, STAR_MAX); k < n; k++) {
+      const x = 1 + (k % 4) * 4, y = 15 - Math.floor(k / 4) * 4, paper = '#f1ead8';
+      const hot = (flick + k) % 2;
+      put(x, y, '\\|/', paper);
+      put(x, y + 1, '=', paper); put(x + 2, y + 1, '=', paper);
+      put(x + 1, y + 1, hot ? '@' : '*', hot ? HOT : EMBER);
+      put(x, y + 2, '/|\\', paper);
+    }
+    if (prestige > STAR_MAX) put(18, 16, `x${prestige}`, HOT);
+
+    // Titel für alle zehn Kippen-Storys: leuchtet über dem Kopf in wandernden Regenbogenfarben
+    if (stories >= STORY_MAX)
+      for (let i = 0; i < STORY_TITLE.length; i++) {
+        const c = RAINBOW[(i + flick) % RAINBOW.length];
+        put(i, 18, STORY_TITLE[i], `${c};font-weight:bold;text-shadow:0 0 6px ${c},0 0 12px ${c}`);
+      }
+
+    // Zigarette (beim Kotzen nimmt er sie kurz raus)
+    if (phase !== 'idle' && pukeT === 0 && pipe) {
+      // Pfeife: Mundstück am Mund, der Kopf steht eine Zeile höher
+      const px = CIG_X + ox;
+      put(px, MOUTH_ROW, '====', '#d8c9a8');
+      put(px + 4, MOUTH_ROW, '\\__/', WOOD);
+      put(px + 4, MOUTH_ROW - 1, '|  |', WOOD);
+      if (phase === 'done') put(px + 5, MOUTH_ROW - 1, '..', brand.smoke[2]);
+      else if (phase === 'light') {
+        put(px + 5, MOUTH_ROW - 1, '%%', '#8a6a3a');
+        if (t > 4) put(px + 5, MOUTH_ROW - 2, t % 2 ? ')' : '(', HOT);
+      } else if (phase === 'drag') put(px + 5, MOUTH_ROW - 1, '@@', HOT);
+      else put(px + 5, MOUTH_ROW - 1, '**', EMBER);
+    } else if (phase !== 'idle' && pukeT === 0) {
+      const fx = CIG_X + ox, f = brand.filter, tx = tipX() + ox;
+      if (f) put(fx, MOUTH_ROW, f, brand.filterColor);
+      if (phase === 'done') {
+        put(fx + f.length, MOUTH_ROW, '.', brand.smoke[2]);
+      } else {
+        put(fx + f.length, MOUTH_ROW, '='.repeat(cigLen), brand.paper);
+        if (phase === 'light') {
+          put(tx, MOUTH_ROW, '|', brand.paper);
+          if (brand.lighter === 'match') {
+            if (t > 3) put(tx + 1, MOUTH_ROW - 1, t % 2 ? ')' : '(', HOT);
+            put(tx + 1, MOUTH_ROW, '\\', WOOD);
+            put(tx + 2, MOUTH_ROW + 1, '\\', WOOD);
+          } else {
+            if (t > 4) put(tx + 1, MOUTH_ROW - 1, t % 2 ? ')' : '(', HOT);
+            put(tx + 1, MOUTH_ROW, '#', METAL);
+            put(tx + 1, MOUTH_ROW + 1, '[]', METAL);
+          }
+        } else if (phase === 'drag') {
+          put(tx, MOUTH_ROW, '@', HOT);
+        } else {
+          put(tx, MOUTH_ROW, '*', EMBER);
+        }
+      }
+    }
+
+    // Flammen-Marke: die Glut lodert
+    if (brand.fire && !pipe && pukeT === 0 && ['rest', 'drag', 'hold', 'exhale', 'cough'].includes(phase)) {
+      const tx = tipX() + ox;
+      put(tx + 1, MOUTH_ROW, flick % 2 ? '>' : ')', HOT);
+      put(tx, MOUTH_ROW - 1, flick % 2 ? '(' : ')', EMBER);
+    }
+
+    // Upgrades in der Szene
+    for (let k = 0, n = scaled(owned.glueck, 24, 48, 2); k < n; k++)
+      put(1 + (k % 12) * 2, Math.floor(k / 12), '♣', '#5fd05f');
+    for (let k = 0, n = scaled(owned.filter, 12, 24, 2); k < n; k++)
+      put(1 + (k % 4) * 4, 5 + Math.floor(k / 4), '[#]', '#c98f4e');
+    if (phase !== 'idle' && phase !== 'light')
+      for (let k = 0, n = extraCount(); k < n; k++) {
+        // die glühende zittert, lodert und schlägt eine Stichflamme
+        const glow = extraGlow(k), y = MOUTH_ROW + EXTRA_ROWS[k];
+        const x = 17 + (glow ? flick % 2 : 0);
+        put(x, y, '[#]', '#c98f4e');
+        put(x + 3, y, '====', glow ? '#fff6c8' : '#f1ead8');
+        if (glow) {
+          put(x + 7, y, '@#'[flick % 2], flick % 2 ? '#ffffff' : HOT);
+          put(x + 8, y, ['>', '>>', '>>>', '>>'][(flick + k) % 4], (flick + k) % 2 ? EMBER : HOT);
+        } else {
+          put(x + 7, y, '*', (flick + k) % 3 ? EMBER : '#b0401a');
+        }
+      }
+    // Rauch und Funken der Extra-Kippen liegen vor den Bierkästen
+    for (const p of particles) if (p.front) drawP(p);
+    // Böden der oberen Etagen, sobald dort jemand steht
+    for (let tier = 1; tier * HELP_COLS < HELPERS.length; tier++)
+      if (HELPERS.some((h, i) => Math.floor(i / HELP_COLS) === tier && owned[h.id]))
+        put(HELP_X0, H - TIER_H * tier, '='.repeat(HELP_COLS * 7), '#3a4234');
+    HELPERS.forEach((h, i) => {
+      const p = helperPos(i);
+      let low = h.art[1];
+      if (h.id === 'slot') {
+        const shown = spinning
+          ? Array.from({ length: 3 }, () => SLOT_SYMS[Math.floor(Math.random() * 4)]).join('')
+          : reels.join('');
+        low = ' |' + shown + '|o';
+      }
+      for (let k = 0, n = helperCount(h); k < n; k++) {
+        put(p.x, p.y - 1 - 2 * k, h.art[0], h.color);
+        put(p.x, p.y - 2 * k, low, h.color);
+      }
+    });
+
+    // Arzt (läuft im Vordergrund durchs Bild)
+    if (doc) {
+      const x = Math.round(doc.x), y = H - 1, white = '#f4f4f4', red = '#e0483a';
+      const shake = doc.state === 'shake';
+      const hs = shake ? [-1, 0, 1, 0][Math.floor(doc.t / 3) % 4] : 0;   // Kopfschütteln
+      put(x + hs, y - 3, '  _+_', white); put(x + hs + 3, y - 3, '+', red);
+      put(x + hs, y - 2, ' (-_-)', white);
+      put(x, y - 1, ' /[+]\\', white); put(x + 3, y - 1, '+', red);
+      put(x, y, shake || Math.floor(doc.t / 2) % 2 ? '  / \\' : '   |', white);
+    }
+
+    // Besucher
+    if (visitor) {
+      const v = visitor.v, fr = Math.floor(visitor.t / 3);
+      const f = v.frames[fr % v.frames.length], hop = v.hop ? fr % 2 : 0;
+      f.forEach((l, i) => put(Math.round(visitor.x), visitor.y - hop - (f.length - 1) + i, l, v.color));
+    }
+
+    // HTML zusammenbauen (aufeinanderfolgende Zellen gleicher Farbe bündeln)
+    let html = '';
+    // anklickbare Stellen, je drei Zellen breit, damit man sie gut trifft (Schlüssel = linke Zelle)
+    const hot = new Map();
+    if (shiny) {
+      const sp = shinyPos();
+      const sc = k => SHINY_COLORS[(flick + k) % SHINY_COLORS.length];
+      hot.set(sp.y * W + sp.x - 1,
+        `<span class="shiny"><span style="color:${sc(0)}">${flick % 2 ? '*' : '+'}</span>`
+        + `<span style="color:${sc(1)}">=</span><span style="color:${sc(2)}">${flick % 2 ? '+' : '*'}</span></span>`);
+    }
+    drops.forEach((d, i) => {
+      const x = Math.max(1, Math.min(W - 2, Math.round(d.x))), y = Math.min(H - 1, Math.round(d.y));
+      hot.set(y * W + x - 1, `<span class="drop" data-i="${i}">[=${flick % 2 ? '*' : '@'}</span>`);
+    });
+    for (let y = 0; y < H; y++) {
+      let cur = '', buf = '';
+      const flush = () => { if (buf) html += cur ? `<span style="color:${cur}">${buf}</span>` : buf; buf = ''; };
+      for (let x = 0; x < W; x++) {
+        const h = hot.get(y * W + x);
+        if (h) { flush(); html += h; x += 2; continue; }
+        if (cl[y][x] !== cur) { flush(); cur = cl[y][x]; }
+        buf += esc(ch[y][x]);
+      }
+      flush();
+      if (y < H - 1) html += '\n';
+    }
+    sceneEl.innerHTML = html;
+  }
+
+  packEl.addEventListener('click', () => {
+    if (phase !== 'idle') return;
+    if (counts[brand.id] === 0) {
+      counts[brand.id] = FULL_PACK;
+      setStatus('Neue Schachtel aufgemacht.');
+      renderPack();
+      return;
+    }
+    startCig();
+    renderBrands();
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    if (!confirm('Wirklich den ganzen Fortschritt löschen?')) return;
+    smoked = 0; bank = 0; prestige = 0; stories = 0; bossWins = 0;
+    if (boss) endBoss();
+    renderStories(); showStory(-1);
+    for (const u of UPGRADES) owned[u.id] = 0;
+    resetPile();
+    char = CHARS[0];
+    if (brand.need) brand = BRANDS[0];
+    if (pendingBrand && pendingBrand.need) pendingBrand = null;
+    save();
+    setStatus('Fortschritt zurückgesetzt.', 2000);
+    renderBrands(); renderPack(); draw();
+  });
+
+  renderBrands();
+  renderPack();
+  setStatus(brand.say.idle);
+  draw();
+
+  // ---- Turbo-Knopf: je schneller geklickt wird, desto schneller wird geraucht
+  const turboEl = document.getElementById('turbo');
+  const speedEl = document.getElementById('speed');
+  const MAX_CPS = 20;            // mehr Klicks pro Sekunde bringen nichts mehr
+  let clicks = [];               // Zeitstempel der Klicks der letzten Sekunde
+  let acc = 0;
+
+  // Taste gedrückt halten zählt nicht als Schnellklicken
+  turboEl.addEventListener('keydown', e => { if (e.repeat) e.preventDefault(); });
+
+  turboEl.addEventListener('click', () => {
+    if (phase === 'idle') startCig(); else clicks.push(performance.now());
+  });
+
+  function currentSpeed() {
+    const now = performance.now();
+    clicks = clicks.filter(c => now - c < 1000);
+    if (phase === 'idle') clicks = [];
+    // ohne Klicks Standardtempo (1x). Der Klick-Bonus wächst quadratisch mit den Klicks/Sekunde:
+    // 5/s = +6x, 10/s = +20x, 15/s = +41x, 20/s = +70x (Maximum)
+    const c = Math.min(MAX_CPS, clicks.length);
+    return 1 + owned.bier * 0.5 + 0.5 * c + 0.15 * c * c;
+  }
+
+  function renderSpeed(speed) {
+    const bars = Math.min(MAX_CPS, clicks.length);
+    const txt = `Tempo ${speed.toFixed(1)}x [${'>'.repeat(bars)}${' '.repeat(MAX_CPS - bars)}]`
+      + (bars ? `\n${clicks.length} Klicks/s` : '\n ');
+    if (speedEl.textContent !== txt) speedEl.textContent = txt;
+    speedEl.style.color = bars >= 15 ? '#ffd24a' : bars > 0 ? '#ff8a2a' : '';
+  }
+
+  // ---- Shop ---------------------------------------------------------------
+  const bankEl = document.getElementById('bank');
+  const rateEl = document.getElementById('rate');
+  const shopEl = document.getElementById('shop');
+
+  const fmt = n => {
+    if (n >= 1e12) return (n / 1e12).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Bio.';
+    if (n >= 1e9) return (n / 1e9).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Mrd.';
+    if (n >= 1e6) return (n / 1e6).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' Mio.';
+    return Math.floor(n).toLocaleString('de-DE');
+  };
+  const setText = (el, s) => { if (el.textContent !== s) el.textContent = s; };
+
+  const shopRows = UPGRADES.map(u => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const name = document.createElement('span'); name.className = 'un';
+    const fx = document.createElement('span'); fx.className = 'ue'; fx.textContent = u.fx;
+    const price = document.createElement('span');
+    btn.append(name, fx, price);
+    btn.addEventListener('click', () => {
+      const p = priceOf(u);
+      if (bank < p) return;
+      bank -= p;
+      owned[u.id]++;
+      save();
+      setStatus(`Gekauft: ${u.name}`, 1500);
+      renderHud();
+    });
+    shopEl.appendChild(btn);
+    return { u, btn, name, price };
+  });
+
+  // ---- Kippen-Storys ------------------------------------------------------
+  const STORIES = [
+    { t: 'Daniels letzte Kippe',
+      s: 'Daniel schwor, das sei seine allerletzte Kippe. Das war vor sechs Jahren. Seitdem raucht er jeden Tag „die allerletzte“. Der Arzt nennt es Sucht, Daniel nennt es Konsequenz.' },
+    { t: 'Adrian und der Automat',
+      s: 'Adrian warf sein letztes Kleingeld in den Zigarettenautomaten. Der Automat schluckte es, bekam Beine und lief davon. Adrian rannte ihm drei Straßen hinterher. Am Ende teilten sie sich eine.' },
+    { t: 'Mattias Bart',
+      s: 'In Mattias Bart verschwand eines Tages eine brennende Kippe. Er suchte zwei Wochen lang. Gefunden hat er sie nie, aber seitdem qualmt der Bart von allein, und Mattia spart ein Vermögen.' },
+    { t: 'Tomas im Meeting',
+      s: 'Tomas ging „nur kurz eine rauchen“. Als er zurückkam, war das Meeting vorbei, das Projekt abgeschlossen und die Firma verkauft. Seine Krawatte saß trotzdem perfekt.' },
+    { t: 'Robins Geheimrezept',
+      s: 'Robin kochte ein Fünf-Gänge-Menü, und alle lobten das feine Raucharoma. Sein Geheimnis hat er nie verraten. Nur der Rauchmelder kannte es, und der hat längst gekündigt.' },
+    { t: 'Mario und der Rauchmelder',
+      s: 'Mario hat seinen Rauchmelder nie abgeschraubt. Er hat ihm das Rauchen einfach so lange vorgemacht, bis der aufgab. Heute piept er nur noch, wenn die Schachtel leer ist.' },
+    { t: 'Feuer?',
+      s: 'Daniel und Adrian trafen sich an der Bushaltestelle. „Hast du Feuer?“ – „Nein. Hast du Kippen?“ – „Nein.“ Sie standen zwanzig Minuten schweigend im Regen. Es war die schönste Raucherpause ihres Lebens.' },
+    { t: 'Mattia beim Arzt',
+      s: 'Der Arzt schüttelte den Kopf: „Sie müssen sofort aufhören.“ Mattia nickte, ging raus und zündete sich eine an. Der Arzt kam hinterher: „Ich meinte: nicht ohne mich.“' },
+    { t: 'Tomas und die Aliens',
+      s: 'Die Aliens flogen vierzig Lichtjahre weit zur Erde, um die Menschheit zu warnen. Dann bot Tomas ihnen eine Kippe an. Jetzt kreisen sie über der Tankstelle und fragen, ob jemand eine übrig hat.' },
+    { t: 'JakobFuckingJones',
+      s: 'Als JakobFuckingJones seine erste Kippe anzündete, ging die Sonne freiwillig unter. Er raucht nicht, die Zigaretten rauchen ihn, aus Respekt. Auf seinem Kippenberg steht ein Schild: „Rauchen verboten.“ Es gilt für alle außer ihm.' }
+  ];
+  const storyBuyEl = document.getElementById('storybuy');
+  const storyListEl = document.getElementById('storylist');
+  const storyTextEl = document.getElementById('storytext');
+  let storyOpen = -1;
+
+  function showStory(i) {
+    storyOpen = i;
+    const st = STORIES[i];
+    storyTextEl.hidden = !st;
+    storyTextEl.textContent = '';
+    if (st) {
+      const h = document.createElement('b');
+      h.textContent = `${i + 1}. ${st.t}`;
+      storyTextEl.append(h, document.createElement('br'), st.s);
+    }
+    renderStories();
+  }
+
+  function renderStories() {
+    storyListEl.innerHTML = '';
+    for (let i = 0; i < stories; i++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = `${i + 1}. ${STORIES[i].t}`;
+      btn.style.setProperty('--c', '#ffd24a');
+      btn.className = i === storyOpen ? 'active' : '';
+      btn.addEventListener('click', () => showStory(i === storyOpen ? -1 : i));
+      storyListEl.appendChild(btn);
+    }
+  }
+
+  storyBuyEl.addEventListener('click', () => {
+    if (stories >= STORY_MAX || bank < STORY_COST) return;
+    bank -= STORY_COST;
+    stories++;
+    save();
+    setStatus(stories >= STORY_MAX ? `★★★ Alle Storys! Du bist „${STORY_TITLE}“ ★★★`
+      : `Neue Kippen-Story: ${STORIES[stories - 1].t}`, 4000);
+    showStory(stories - 1);
+    renderHud(); draw();
+  });
+  renderStories();
+
+  const prestigeEl = document.getElementById('prestige');
+  prestigeEl.addEventListener('click', () => {
+    if (!owned.vulkan || bank < PRESTIGE_COST) return;
+    if (!confirm(`Prestige ${prestige + 1}: Kostet ${fmt(PRESTIGE_COST)} Kippen. Alle Kippen und Upgrades `
+      + 'fangen bei null an, Charaktere und Sorten bleiben. Dafür gibt es einen Zigaretten-Stern. Weiter?')) return;
+    prestige++;
+    bank = 0;
+    for (const u of UPGRADES) owned[u.id] = 0;
+    save();
+    setStatus(`★ PRESTIGE ${prestige}! Ein neuer Zigaretten-Stern. ★`, 4000);
+    renderHud(); draw();
+  });
+
+  function renderHud() {
+    storyBuyEl.disabled = stories >= STORY_MAX || bank < STORY_COST;
+    setText(storyBuyEl, stories >= STORY_MAX
+      ? `[ Alle ${STORY_MAX} Kippen-Storys gesammelt · ${STORY_TITLE} ]`
+      : `[ KIPPEN-STORY ${stories + 1}/${STORY_MAX} kaufen · ${fmt(STORY_COST)} Kippen ]`);
+    prestigeEl.hidden = !owned.vulkan;
+    prestigeEl.disabled = bank < PRESTIGE_COST;
+    setText(prestigeEl, `[ PRESTIGE ${prestige + 1} · ${fmt(PRESTIGE_COST)} Kippen ]`);
+    setText(bankEl, `Kippen: ${fmt(bank)}` + (prestige ? ` · Prestige ${prestige}` : ''));
+    const next = CHARS.find(c => c.need > smoked);
+    setText(rateEl,
+      `automatisch +${kps() < 1e6 ? kps().toLocaleString('de-DE', { maximumFractionDigits: 1 }) : fmt(kps())}/s`
+      + (owned.slot ? ` · Slots Ø +${fmt(owned.slot * SLOT_AVG)}/s` : '')
+      + ` · ${fmt(perCig())} pro Zigarette`
+      + ` · insgesamt geraucht: ${fmt(smoked)}`);
+    setText(statsEl, (next ? `nächster Charakter: ${next.name} ab ${fmtNeed(next.need)}` : 'alle Charaktere freigespielt')
+      + (smoked >= BUFF_NEED ? ' · Buff: Bürgergeld (aktiv)' : ` · Buff „Bürgergeld“ ab ${fmtNeed(BUFF_NEED)}`));
+    for (const r of shopRows) {
+      const p = priceOf(r.u);
+      setText(r.name, `${r.u.name}  x${owned[r.u.id]}`);
+      setText(r.price, `Preis: ${fmt(p)} Kippen`);
+      r.btn.disabled = bank < p;
+    }
+  }
+
+  // ---- Bosskämpfe ---------------------------------------------------------
+  // Alle 1 bis 2 Minuten taucht ein Boss anstelle der Schachtel auf und muss in der Zeit besiegt werden.
+  // Die Bosse kommen der Reihe nach; wer entkommt, kommt beim nächsten Mal wieder.
+  const bossArt = s => s.split('\n').slice(1);
+  const BOSSES = [
+    { name: 'KippenDieb', hp: 40, reward: 10000, color: '#b8c4a6', art: bossArt(String.raw`
+     .--------.
+    /##########\
+   | ##(o)(o)## |
+   |     <>     |
+    \   ~~~~   /==*
+  ___'--------'___
+ /   \ KIPPEN /   \
+|  |  \ [==] /  |  |
+|__|   '----'   |__|
+   |___|    |___|`) },
+    { name: 'ArnoDübel', hp: 400, reward: 50000, color: '#f0c090', art: bossArt(String.raw`
+        ,,,,,,,
+       ( -  - )
+       (   >  )=====*
+        \ __ /
+   .-----'  '-----.
+  /                \
+ |  ________________|_
+ | |    S  O  F  A    |
+ |_|__________________|
+   ()              ()`) },
+    { name: 'Shisharaucher', hp: 4000, reward: 100000, color: '#3fbfbf', art: bossArt(String.raw`
+      .-----.         (  )
+     / ~~~~~ \       (    )
+    |  o   o  |       (  )
+    |    >    |        ||
+     \  ___  /~~~~.   .--.
+   ___'-----'___   \  |  |
+  /             \   \ |  |
+ |               |  /====\
+ |               | (  @@  )
+ |___|_______|___|  \____/`) },
+    { name: 'E-Zigaretten Raucher', hp: 60000, reward: 500000, color: '#ff7eb6', art: bossArt(String.raw`
+  (  )  (    )   (   )  (  )
+ (    )(  VAPE  )(     )(    )
+  (  )  (    )   (   )  (  )
+        .---------.
+       / ######### \
+      |  [o]   [o]  |
+      |      ^      |
+      |    \___/ [====]:::
+       \           /
+   _____'---------'_____
+  /    MANGO-EIS 20mg   \
+ |   |               |   |
+ |___|               |___|
+     |______| |______|`) }
+  ];
+  // Leben und Belohnung wachsen mit dem Einkommen (Kippen/s inkl. Slots), gemessen beim Auftauchen:
+  //   Leben      = Grundwert (hp)     + Einkommen x secs
+  //   Belohnung  = Grundwert (reward) + Einkommen x pay
+  // Die Helfer greifen automatisch an (Einkommen pro Sekunde als Schaden). Das allein reicht in der
+  // Zeit (time, in s) nie ganz, den Rest muss man klicken.
+  const BOSS_SCALE = [
+    { secs: 40,  pay: 10, time: 30 },
+    { secs: 60,  pay: 15, time: 40 },
+    { secs: 90,  pay: 20, time: 50 },
+    { secs: 150, pay: 30, time: 60 }
+  ];
+  const BOSS_GAP = [60000, 120000];   // Pause zwischen zwei Bossen in ms (1 bis 2 min, nach der Uhr)
+  const bossEl = document.getElementById('boss');
+  const bossNameEl = document.getElementById('bossname');
+  const bossFillEl = document.getElementById('bosshpfill');
+  const bossArtEl = document.getElementById('bossart');
+  const bossInfoEl = document.getElementById('bossinfo');
+  let boss = null, nextBossAt = performance.now() + BOSS_GAP[0], bossLast = 0;
+  const income = () => kps() + owned.slot * SLOT_AVG;
+  // Klickschaden: Kippen-Boni (pro Zigarette x Bier-Tempo) plus eine Viertelsekunde Einkommen
+  const bossClick = () => perCig() * (1 + 0.5 * owned.bier) + 0.25 * income();
+
+  function startBoss(now) {
+    const i = bossWins % BOSSES.length, b = BOSSES[i], sc = BOSS_SCALE[i], inc = income();
+    const hp = b.hp + inc * sc.secs;
+    boss = { b, hp, max: hp, reward: b.reward + inc * sc.pay, end: now + sc.time * 1000 };
+    bossLast = now;
+    bossEl.style.color = b.color;
+    bossNameEl.textContent = `BOSS: ${b.name}`;
+    bossArtEl.textContent = b.art.join('\n');
+    packEl.hidden = true; bossEl.hidden = false;
+    setStatus(`BOSSKAMPF: ${b.name}! Klick ihn weg!`, 3000);
+    renderBoss();
+  }
+
+  function endBoss() {
+    boss = null;
+    nextBossAt = performance.now() + rnd(BOSS_GAP[0], BOSS_GAP[1]);
+    bossEl.hidden = true; packEl.hidden = false;
+  }
+
+  function renderBoss() {
+    const frac = Math.max(0, boss.hp / boss.max);
+    bossFillEl.style.width = `${(frac * 100).toFixed(1)}%`;
+    bossFillEl.style.background = frac > 0.5 ? '#5fd05f' : frac > 0.25 ? '#ffd24a' : '#e0483a';
+    setText(bossInfoEl, `Leben: ${fmt(Math.max(0, boss.hp))} / ${fmt(boss.max)}`
+      + `\nnoch ${Math.max(0, Math.ceil((boss.end - performance.now()) / 1000))} s`
+      + `\nAuto-Angriff: ${fmt(income())}/s · Klick: ${fmt(bossClick())}`
+      + `\nBelohnung: ${fmt(boss.reward)} Kippen`);
+  }
+
+  // zieht Leben ab; true, wenn der Boss damit besiegt ist
+  function damageBoss(d) {
+    boss.hp -= d;
+    if (boss.hp > 0) return false;
+    const b = boss.b, reward = boss.reward;
+    bossWins++;
+    endBoss();
+    addKippen(reward);
+    setStatus(`★ ${b.name} besiegt! +${fmt(reward)} Kippen ★`, 4000);
+    save();
+    renderHud();
+    return true;
+  }
+
+  function bossTick() {
+    const now = performance.now();
+    if (!boss) {
+      if (now >= nextBossAt) startBoss(now);
+      return;
+    }
+    // automatischer Angriff der Helfer
+    const dt = Math.min(2, (now - bossLast) / 1000);
+    bossLast = now;
+    if (damageBoss(income() * dt)) return;
+    if (now >= boss.end) {
+      setStatus(`${boss.b.name} ist entkommen! Kein Bonus, dein Einkommen läuft normal weiter.`, 3500);
+      endBoss();
+      return;
+    }
+    renderBoss();
+  }
+
+  bossEl.addEventListener('pointerdown', () => {
+    if (!boss) return;
+    bossEl.classList.add('hit');
+    setTimeout(() => bossEl.classList.remove('hit'), 80);
+    if (!damageBoss(bossClick())) renderBoss();
+  });
+
+  // Rauch der Helfer (Extra-Kippe, Raucher, Maschine, ...)
+  let loopTick = 0;
+  function helperSmoke() {
+    pileTick();
+    // Extra-Kippen: die glühenden stoßen dicke Wolken und Funken aus, die anderen qualmen nach
+    if (owned.extra && phase !== 'idle' && phase !== 'light' && loopTick % 2 === 0)
+      for (let k = 0, n = extraCount(); k < n; k++) {
+        const y = MOUTH_ROW + EXTRA_ROWS[k];
+        if (extraGlow(k)) {
+          spawn(26, y + rnd(-0.3, 0.3), rnd(0.5, 1.4), rnd(-0.45, -0.1), rnd(14, 26), 'smoke', { front: true });
+          spawn(25, y - 1, rnd(-0.1, 0.3), rnd(-0.5, -0.3), rnd(12, 22), 'smoke', { front: true });
+          spawn(26, y, rnd(1, 2.4), rnd(-0.35, 0.25), rnd(5, 11), 'spark',
+            { front: true, color: Math.random() < 0.5 ? HOT : EMBER });
+        } else if (loopTick % 4 === 0) {
+          spawn(24, y - 1, rnd(-0.1, 0.15), rnd(-0.35, -0.2), rnd(12, 20), 'smoke', { front: true });
+        }
+      }
+    if (loopTick % 5 !== 0) return;
+    HELPERS.forEach((h, i) => {
+      if (!owned[h.id] || !h.sx) return;
+      const sx = h.sx[Math.floor(Math.random() * h.sx.length)];
+      const lv = Math.floor(Math.random() * helperCount(h));
+      const p = helperPos(i);
+      spawn(p.x + sx, p.y - 1 - 2 * lv + (h.so ?? -1), rnd(-0.1, 0.1), rnd(-0.35, -0.2), rnd(12, 22));
+    });
+  }
+
+  // Arzt: kommt von rechts, bleibt vor dem Raucher stehen, schüttelt den Kopf und geht wieder
+  function docTick() {
+    if (!doc) {
+      if (loopTick >= nextDoc) doc = { x: W, state: 'in', t: 0 };
+      return;
+    }
+    doc.t++;
+    if (doc.state === 'in') {
+      doc.x -= 1.5;
+      if (doc.x <= DOC_STOP) {
+        doc.state = 'shake'; doc.t = 0;
+        setStatus('Der Arzt schüttelt den Kopf. *tz tz tz*', 3500);
+      }
+    } else if (doc.state === 'shake') {
+      if (doc.t > 38) { doc.state = 'out'; doc.t = 0; }
+    } else {
+      doc.x += 1.5;
+      // nächster Besuch in 1 bis 3 Minuten
+      if (doc.x >= W) { doc = null; nextDoc = loopTick + Math.floor(rnd(700, 2000)); }
+    }
+  }
+
+  function visitorTick() {
+    if (!visitor) {
+      if (loopTick < nextVisitor) return;
+      const pool = VISITORS.filter(v => (v.need || 0) <= smoked);
+      const v = pool[Math.floor(Math.random() * pool.length)];
+      const w = Math.max(...v.frames[0].map(l => l.length));
+      visitor = { v, w, t: 0, x: v.dir < 0 ? W : -w, y: v.sky ? Math.floor(rnd(6, 13)) : H - 1 };
+      setStatus(v.say, 2500);
+      return;
+    }
+    const s = visitor, v = s.v;
+    s.t++; s.x += v.dir * v.speed;
+    if (v.smoke && s.t % 3 === 0) {
+      const sx = s.x + v.smoke[0];
+      if (sx >= 0 && sx < W)
+        spawn(sx, s.y - v.frames[0].length + v.smoke[1], rnd(-0.1, 0.1), rnd(-0.35, -0.2), rnd(10, 18));
+    }
+    // das UFO wirft alle paar Sekunden eine Kippe ab
+    if (v.drop && s.t % 30 === 15) {
+      const dx = s.x + s.w / 2;
+      if (dx > 3 && dx < W - 3) drops.push({ x: dx, y: s.y + 1, life: DROP_REST });
+    }
+    // nächster Besuch in ~30 bis 90 s
+    if (v.dir < 0 ? s.x < -s.w : s.x >= W) { visitor = null; nextVisitor = loopTick + Math.floor(rnd(350, 1000)); }
+  }
+
+  // alle 10 Minuten wird dem Raucher schlecht; solange pausiert das Rauchen
+  function pukeTick() {
+    if (pukeT === 0) {
+      if (performance.now() - lastPuke < PUKE_EVERY) return;
+      lastPuke = performance.now();
+      pukeT = PUKE_TICKS;
+      setStatus('*würg* ... *KOTZ*', PUKE_TICKS * TICK);
+    }
+    pukeT--;
+    ox = pukeT > 0 && pukeT % 4 < 2 ? 1 : 0;
+    if (pukeT > 8)
+      for (let i = 0; i < 3; i++)
+        spawn(CIG_X + 1 + ox, MOUTH_ROW, rnd(0.3, 1.2), rnd(-0.35, 0.1), rnd(30, 50), 'puke');
+  }
+
+  // Slotmachine: Drilling 777 zahlt 7.777, anderer Drilling 2.000, ein Paar 175 (je Automat)
+  function slotTick() {
+    if (!owned.slot) { spinning = false; return; }
+    const ph = loopTick % SLOT_EVERY;
+    spinning = ph >= SLOT_EVERY - 8;
+    if (ph !== 0) return;
+    reels = reels.map(() => SLOT_SYMS[Math.floor(Math.random() * 4)]);
+    const [a, b, c] = reels;
+    const triple = a === b && b === c;
+    const win = owned.slot * (triple ? (a === '7' ? 7777 : 2000) : (a === b || b === c || a === c) ? 175 : 0);
+    addKippen(win);
+    if (triple) setStatus(`${a === '7' ? 'JACKPOT' : 'Drilling'} ${reels.join('')}! +${fmt(win)} Kippen`, 2500);
+  }
+
+  const MAX_STEPS = 8;           // schneller als 8x wird nicht animiert, sondern als Ertrag gutgeschrieben
+  setInterval(() => {
+    loopTick++;
+    if (phase === 'idle' && autoOn()) startCig();
+    const speed = currentSpeed();
+    const vis = Math.min(speed, MAX_STEPS);
+    yieldMult = speed / vis;
+    pukeTick();
+    if (pukeT > 0) {
+      // Figur ist beschäftigt: nur die Partikel laufen weiter
+      const p0 = phase, t0 = t;
+      phase = 'idle'; step(); phase = p0; t = t0;
+      ox = pukeT % 4 < 2 ? 1 : 0;
+    } else {
+      acc += vis;
+      while (acc >= 1) { step(); acc--; }
+    }
+    helperSmoke();
+    if (brand.fire) {
+      // der ganze Boden brennt, dazu Funken überall in der Szene
+      for (let i = 0; i < 4; i++)
+        spawn(rnd(0, W - 1), H - 1, rnd(-0.1, 0.1), rnd(-0.7, -0.3), rnd(6, 16), 'glyph', { chars: "^*'.", rate: 3 });
+      spawn(rnd(0, W - 1), rnd(0, H - 1), 0, -0.2, rnd(4, 7), 'spark', { color: Math.random() < 0.5 ? HOT : EMBER });
+      if (loopTick % 2 === 0) renderPack();
+    }
+    slotTick();
+    shinyTick();
+    docTick();
+    visitorTick();
+    dropTick();
+    // normales Einkommen läuft immer weiter, auch während und nach einem verlorenen Bosskampf
+    addKippen(kps() * TICK / 1000);
+    // ein Fehler im Bosskampf darf das Spiel nie anhalten
+    try { bossTick(); } catch (e) { console.error('Bosskampf:', e); if (boss) endBoss(); }
+    draw();
+    renderSpeed(speed);
+    renderHud();
+    if (loopTick % 55 === 0) save();
+  }, TICK);
+  syncPile();
+  renderSpeed(1);
+  renderHud();
+})();
+</script>
+</body>
+</html>
