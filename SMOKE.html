@@ -750,16 +750,14 @@
 
   // kleine Helfer rechts in der Szene
   const HELP_X0 = 44;            // Spalte des ersten Helfers
-  // Wie viele Exemplare eines Upgrades zu sehen sind: bis `lin` jedes einzeln,
-  // danach langsamer, nach `span` Zehnerpotenzen ist bei `max` Schluss.
-  const scaled = (n, lin, max, span) =>
-    n <= lin ? n : Math.min(max, Math.floor(lin + (max - lin) * Math.log10(n / lin) / span));
-  const helperCount = h => scaled(owned[h.id], 4, 5, 2);
+  // Anzeige in Stufen (alles außer Bier): 1 Kauf = 1 Bild, 25 = 2, 100 = 3, 250 = 4
+  const stages = n => n >= 250 ? 4 : n >= 100 ? 3 : n >= 25 ? 2 : n >= 1 ? 1 : 0;
+  const helperCount = h => stages(owned[h.id]);
   // Helfer stehen in zwei Etagen zu je HELP_COLS Plätzen; y = unterste Zeile des ersten Exemplars
   // (drei Etagen, je TIER_H Zeilen hoch: Platz für 5 Exemplare übereinander plus Boden)
   const HELP_COLS = 9, TIER_H = 11;
   const helperPos = i => ({ x: HELP_X0 + (i % HELP_COLS) * 7, y: H - 1 - TIER_H * Math.floor(i / HELP_COLS) });
-  const extraCount = () => scaled(owned.extra, 4, 8, 2);
+  const extraCount = () => stages(owned.extra);
   const EXTRA_ROWS = [2, 1, -2, -3, -4, -5, -6, -7];   // Zeilen der Extra-Kippen relativ zum Mund
   // abwechselnd: jede zweite Extra-Kippe glüht im Gegentakt
   const extraGlow = k => (phase === 'rest') !== (k % 2 === 1);
@@ -1312,9 +1310,9 @@
     }
 
     // Upgrades in der Szene
-    for (let k = 0, n = scaled(owned.glueck, 24, 48, 2); k < n; k++)
+    for (let k = 0, n = stages(owned.glueck); k < n; k++)
       put(1 + (k % 12) * 2, Math.floor(k / 12), '♣', '#5fd05f');
-    for (let k = 0, n = scaled(owned.filter, 12, 24, 2); k < n; k++)
+    for (let k = 0, n = stages(owned.filter); k < n; k++)
       put(1 + (k % 4) * 4, 5 + Math.floor(k / 4), '[#]', '#c98f4e');
     if (phase !== 'idle' && phase !== 'light')
       for (let k = 0, n = extraCount(); k < n; k++) {
