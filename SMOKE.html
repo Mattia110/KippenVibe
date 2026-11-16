@@ -119,6 +119,7 @@
   #shopwrap { margin-top: 28px; width: 100%; max-width: 980px; }
   #bank { text-align: center; font-size: 1.05rem; color: #ffd24a; margin-bottom: 4px; }
   #rate { text-align: center; font-size: 0.8rem; color: var(--dim); margin-bottom: 12px; }
+  #bulk { margin-bottom: 12px; }
   #shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
   #shop button {
     font: inherit; font-size: 0.8rem; text-align: left;
@@ -190,6 +191,7 @@
   <section id="shopwrap" aria-label="Upgrades">
     <div id="bank"></div>
     <div id="rate"></div>
+    <div id="bulk" class="picker" role="group" aria-label="Kaufmenge"></div>
     <div id="shop"></div>
     <button id="prestige" type="button" hidden></button>
     <button id="saiyan" type="button"></button>
@@ -615,6 +617,8 @@
   const STORE = 'ascii-raucherpause';
   let firstStart = false;      // noch kein Spielstand vorhanden: Intro-Cutscene zeigen
   let seenScenes = [];         // IDs der schon gesehenen Cutscenes (zum erneuten Anschauen)
+  const BULK_MODES = [1, 10, 100, 'max'];
+  let bulk = 1;                // Kaufmenge im Shop: 1, 10, 100 oder 'max' (so viele, wie man sich leisten kann)
   try {
     firstStart = localStorage.getItem(STORE) === null;
     const s = JSON.parse(localStorage.getItem(STORE) || '{}');
@@ -629,9 +633,10 @@
     if (Number.isInteger(s.bossWins) && s.bossWins > 0) bossWins = s.bossWins;
     if (Number.isInteger(s.saiyan) && s.saiyan > 0) saiyan = s.saiyan;
     if (Array.isArray(s.scenes)) seenScenes = s.scenes.filter(id => typeof id === 'string');
+    if (BULK_MODES.includes(s.bulk)) bulk = s.bulk;
   } catch (e) {}
   const save = () => {
-    try { localStorage.setItem(STORE, JSON.stringify({ smoked, bank, owned, char: char.id, prestige, stories, bossWins, saiyan, scenes: seenScenes })); } catch (e) {}
+    try { localStorage.setItem(STORE, JSON.stringify({ smoked, bank, owned, char: char.id, prestige, stories, bossWins, saiyan, scenes: seenScenes, bulk })); } catch (e) {}
   };
 
   let phase = 'idle', t = 0, cigLen = 0, tick = 0, ox = 0;
@@ -1569,6 +1574,33 @@
   };
   const setText = (el, s) => { if (el.textContent !== s) el.textContent = s; };
 
+  // Was ein Klick bei der gewählten Kaufmenge kauft: n Exemplare zum Gesamtpreis cost (jedes Exemplar 15 % teurer).
+  // Bei 'max' so viele, wie das Konto hergibt; reicht es nicht einmal für eines, steht dort der Preis für eines.
+  function bulkOf(u) {
+    const each = i => Math.ceil(u.cost * Math.pow(PRICE_GROWTH, owned[u.id] + i));
+    let n = 0, cost = 0;
+    if (bulk === 'max') {
+      while (n < 1000 && cost + each(n) <= bank) cost += each(n++);
+      if (!n) return { n: 1, cost: each(0) };
+    } else for (; n < bulk; n++) cost += each(n);
+    return { n, cost };
+  }
+
+  const bulkEl = document.getElementById('bulk');
+  function renderBulk() {
+    bulkEl.innerHTML = '';
+    for (const m of BULK_MODES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = m === 'max' ? 'Max' : `x${m}`;
+      btn.style.setProperty('--c', '#ffd24a');
+      btn.className = m === bulk ? 'active' : '';
+      btn.addEventListener('click', () => { bulk = m; save(); renderBulk(); renderHud(); });
+      bulkEl.appendChild(btn);
+    }
+  }
+  renderBulk();
+
   const shopRows = UPGRADES.map(u => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1577,12 +1609,12 @@
     const price = document.createElement('span');
     btn.append(name, fx, price);
     btn.addEventListener('click', () => {
-      const p = priceOf(u);
-      if (bank < p) return;
-      bank -= p;
-      owned[u.id]++;
+      const { n, cost } = bulkOf(u);
+      if (bank < cost) return;
+      bank -= cost;
+      owned[u.id] += n;
       save();
-      setStatus(`Gekauft: ${u.name}`, 1500);
+      setStatus(n > 1 ? `Gekauft: ${n}x ${u.name}` : `Gekauft: ${u.name}`, 1500);
       renderHud();
     });
     shopEl.appendChild(btn);
@@ -1773,10 +1805,10 @@
     setText(statsEl, (next ? `nächster Charakter: ${next.name} ab ${fmtNeed(next.need)}` : 'alle Charaktere freigespielt')
       + (smoked >= BUFF_NEED ? ' · Buff: Bürgergeld (aktiv)' : ` · Buff „Bürgergeld“ ab ${fmtNeed(BUFF_NEED)}`));
     for (const r of shopRows) {
-      const p = priceOf(r.u);
+      const { n, cost } = bulkOf(r.u);
       setText(r.name, `${r.u.name}  x${owned[r.u.id]}`);
-      setText(r.price, `Preis: ${fmt(p)} Kippen`);
-      r.btn.disabled = bank < p;
+      setText(r.price, bulk === 1 ? `Preis: ${fmt(cost)} Kippen` : `${n} Stück: ${fmt(cost)} Kippen`);
+      r.btn.disabled = bank < cost;
     }
   }
 
@@ -3067,8 +3099,8 @@
   renderScenes();
 
   const MAX_STEPS = 8;           // schneller als 8x wird nicht animiert, sondern als Ertrag gutgeschrieben
-  setInterval(() => {
-    if (cut) { cutTick(); return; }   // während der Cutscene steht das Spiel still
+  // Ein Spieltick. render = false: nur rechnen, nichts zeichnen (beim Nachholen verpasster Ticks)
+  function gameTick(render) {
     loopTick++;
     if (phase === 'idle' && autoOn()) startCig();
     const speed = currentSpeed();
@@ -3101,10 +3133,28 @@
     addKippen(kps() * TICK / 1000);
     // ein Fehler im Bosskampf darf das Spiel nie anhalten
     try { bossTick(); } catch (e) { console.error('Bosskampf:', e); if (boss) endBoss(); }
-    draw();
-    renderSpeed(speed);
-    renderHud();
+    if (render) { draw(); renderSpeed(speed); renderHud(); }
     if (loopTick % 55 === 0) save();
+  }
+
+  // Das Spiel läuft nach echter Zeit. Browser drosseln Timer in Hintergrund-Tabs (ein Aufruf pro Sekunde,
+  // nach einigen Minuten nur noch einer pro Minute); die dabei verpassten Ticks werden hier nachgeholt.
+  // Bis CATCH_UP Ticks (gut eine Minute) wird alles durchgerechnet, was darüber hinausgeht
+  // (Rechner im Ruhezustand o. Ä.), gibt nur das passive Einkommen.
+  const CATCH_UP = 700;
+  let lastTickAt = performance.now();
+  setInterval(() => {
+    const now = performance.now();
+    if (cut) { cutTick(); lastTickAt = now; return; }   // während der Cutscene steht das Spiel still
+    const due = Math.floor((now - lastTickAt) / TICK);
+    if (due < 1) return;
+    const n = Math.min(due, CATCH_UP);
+    if (due > n) {
+      addKippen(income() * (due - n) * TICK / 1000);
+      lastTickAt = now;
+    } else lastTickAt += n * TICK;
+    for (let i = 1; i < n && !cut; i++) gameTick(false);   // eine Cutscene, die dabei ausgelöst wird, hält sofort an
+    if (!cut) gameTick(true);
   }, TICK);
   syncPile();
   renderScenes();                // erst jetzt steht die Berggröße fest (Cutscene "Der Gipfel")
