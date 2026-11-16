@@ -58,6 +58,9 @@
     text-shadow: 0 0 6px #ffd24a, 0 0 14px #ff9a2a;
     animation: hairglow 0.5s ease-in-out infinite alternate;
   }
+  /* Prestige-Sterne und Story-Titel eines Super-Saiyajins: eigene Ebene über den Haaren.
+     Die Unterkante setzt das Skript je nach Haarhöhe. */
+  #crown { position: absolute; left: 13px; z-index: 2; pointer-events: none; white-space: pre; }
   /* Teil des Kippenbergs, der oben aus der Szene ragt: Unterkante = Oberkante der obersten Szenenzeile
      (34 Zeilen x 1.15em über dem Szenenboden), rechtsbündig wie der Berg in der Szene */
   #piletop {
@@ -175,6 +178,7 @@
   <main>
     <div id="scenewrap">
       <pre id="hair" aria-hidden="true"></pre>
+      <pre id="crown" aria-hidden="true"></pre>
       <pre id="piletop" aria-hidden="true"></pre>
       <pre id="scene" aria-label="ASCII-Figur" role="img"></pre>
     </div>
@@ -596,9 +600,11 @@
   let pendingBrand = null;       // Markenwechsel, der bei der nächsten Kippe greift
   let yieldMult = 1;
   let char = CHARS[0];
-  // Prestige: ab dem Vulkan für 10 Mrd. Kippen. Kippen und Upgrades fangen neu an,
-  // Charaktere und Sorten bleiben. Jedes Prestige ist ein Zigaretten-Stern über der Figur.
-  const PRESTIGE_COST = 1e10, STAR_MAX = 8;
+  // Prestige: das erste kostet 10 Mrd. Kippen, jedes weitere doppelt so viel wie das vorige.
+  // Kippen und Upgrades fangen neu an, Charaktere und Sorten bleiben.
+  // Jedes Prestige ist ein Zigaretten-Stern über der Figur.
+  const PRESTIGE_COST = 1e10, PRESTIGE_GROWTH = 2, STAR_MAX = 8;
+  const prestigeCost = () => PRESTIGE_COST * Math.pow(PRESTIGE_GROWTH, prestige);
   let prestige = 0;
   // Kippen-Storys: je 250 Mrd. Kippen, bleiben auch nach einem Prestige.
   // Wer alle hat, trägt den Titel "Der Kippen Allwissende".
@@ -854,10 +860,11 @@
   const pileTopEl = document.getElementById('piletop');
   const sceneWrapEl = document.getElementById('scenewrap');
   let hairOver = 0;              // Zeilen, die die Super-Saiyajin-Haare über die Szene hinausragen
+  let crownOver = 0;             // ebenso für Sterne und Titel, die über den Haaren stehen
 
   // Platz über der Szene für alles, was oben herausragt (Haare, Kippenberg)
   function updatePad() {
-    const over = Math.max(0, hairOver, Math.max(...pile) - H);
+    const over = Math.max(0, hairOver, crownOver, Math.max(...pile) - H);
     sceneWrapEl.style.paddingTop = over ? `${(over * 1.15).toFixed(2)}em` : '';
   }
 
@@ -1251,6 +1258,8 @@
     particles = particles.filter(p => p.life > 0 && p.y >= -1 && p.x >= 0 && p.x < W);
   }
 
+  const crownEl = document.getElementById('crown'), CROWN_H = 8;
+  let crownLast = '';            // zuletzt gesetzter Inhalt von #crown (nur bei Änderung neu schreiben)
   function draw() {
     const ch = Array.from({ length: H }, () => Array(W).fill(' '));
     const cl = Array.from({ length: H }, () => Array(W).fill(''));
@@ -1341,23 +1350,38 @@
         : char.hatColor || '#ffffff'));
     face().forEach((l, i) => put(ox, BASE + i, l, char.color));
 
-    // Prestige-Sterne aus Zigaretten über dem Kopf (ab dem neunten nur noch als Zahl)
+    // Über dem Kopf: Prestige-Sterne aus Zigaretten (ab dem neunten nur noch als Zahl) und darunter der Story-Titel.
+    // Zusammen ein Block von CROWN_H Zeilen (Sterne in Zeile 0 bis 6, Titel in Zeile 7), normal in Szenenzeile 11 bis 18.
+    // Als Super-Saiyajin rückt der Block über die Haare und steht in einer eigenen Ebene (#crown), damit sie ihn
+    // nicht verdecken und er oben aus der Szene herausragen kann.
+    const crown = [];              // [x, Zeile im Block, Text, Farbe]
     for (let k = 0, n = Math.min(prestige, STAR_MAX); k < n; k++) {
-      const x = 1 + (k % 4) * 4, y = 15 - Math.floor(k / 4) * 4, paper = '#f1ead8';
+      const x = 1 + (k % 4) * 4, y = 4 - Math.floor(k / 4) * 4, paper = '#f1ead8';
       const hot = (flick + k) % 2;
-      put(x, y, '\\|/', paper);
-      put(x, y + 1, '=', paper); put(x + 2, y + 1, '=', paper);
-      put(x + 1, y + 1, hot ? '@' : '*', hot ? HOT : EMBER);
-      put(x, y + 2, '/|\\', paper);
+      crown.push([x, y, '\\|/', paper], [x, y + 1, '=', paper], [x + 2, y + 1, '=', paper],
+        [x + 1, y + 1, hot ? '@' : '*', hot ? HOT : EMBER], [x, y + 2, '/|\\', paper]);
     }
-    if (prestige > STAR_MAX) put(18, 16, `x${prestige}`, HOT);
-
-    // Story-Titel: leuchtet über dem Kopf in wandernden Regenbogenfarben
+    if (prestige > STAR_MAX) crown.push([18, 5, `x${prestige}`, HOT]);
+    // Story-Titel: leuchtet in wandernden Regenbogenfarben
     const title = storyTitle();
     for (let i = 0; i < title.length; i++) {
       const c = RAINBOW[(i + flick) % RAINBOW.length];
-      put(i, 18, title[i], `${c};font-weight:bold;text-shadow:0 0 6px ${c},0 0 12px ${c}`);
+      crown.push([i, 7, title[i], `${c};font-weight:bold;text-shadow:0 0 6px ${c},0 0 12px ${c}`]);
     }
+    let crownHtml = '', over = 0;
+    if (!saiyan) for (const [x, y, s, c] of crown) put(x, 11 + y, s, c);
+    else if (crown.length) {
+      // lift = so viele Zeilen steht der Block höher als sonst: Titel eine Leerzeile über der Haarspitze
+      const lift = Math.max(0, 3 + 2 * saiyan - 5), w = 26;
+      const cch = Array.from({ length: CROWN_H }, () => Array(w).fill(' ')), ccl = cch.map(r => r.map(() => ''));
+      for (const [x, y, s, c] of crown)
+        for (let i = 0; i < s.length; i++) if (x + i < w && s[i] !== ' ') { cch[y][x + i] = s[i]; ccl[y][x + i] = c; }
+      crownHtml = cch.map((r, y) => r.map((c, x) => ccl[y][x] ? `<span style="color:${ccl[y][x]}">${esc(c)}</span>` : c).join('')).join('\n');
+      crownEl.style.bottom = `calc(9px + ${((H - 1 - (18 - lift)) * 1.15).toFixed(2)}em)`;
+      over = Math.max(0, lift - 11);
+    }
+    if (crownHtml !== crownLast) { crownEl.innerHTML = crownHtml; crownLast = crownHtml; }
+    if (over !== crownOver) { crownOver = over; updatePad(); }
 
     // Zigarette (beim Kotzen nimmt er sie kurz raus)
     if (phase !== 'idle' && pukeT === 0 && pipe) {
@@ -1771,8 +1795,9 @@
 
   const prestigeEl = document.getElementById('prestige');
   prestigeEl.addEventListener('click', () => {
-    if (!owned.vulkan || bank < PRESTIGE_COST) return;
-    if (!confirm(`Prestige ${prestige + 1}: Kostet ${fmt(PRESTIGE_COST)} Kippen. Alle Kippen und Upgrades `
+    const cost = prestigeCost();
+    if (bank < cost) return;
+    if (!confirm(`Prestige ${prestige + 1}: Kostet ${fmt(cost)} Kippen. Alle Kippen und Upgrades `
       + 'fangen bei null an, Charaktere und Sorten bleiben. Dafür gibt es einen Zigaretten-Stern. Weiter?')) return;
     prestige++;
     bank = 0;
@@ -1792,9 +1817,9 @@
       : `[ KIPPEN-STORY ${stories + 1}/${STORY_MAX} kaufen · ${fmt(STORY_COST)} Kippen ]`
         + ((STORY_TITLES.find(([n]) => n > stories) || [])[0]
           ? ` · Titel bei ${STORY_TITLES.find(([n]) => n > stories)[0]}` : ''));
-    prestigeEl.hidden = !owned.vulkan;
-    prestigeEl.disabled = bank < PRESTIGE_COST;
-    setText(prestigeEl, `[ PRESTIGE ${prestige + 1} · ${fmt(PRESTIGE_COST)} Kippen ]`);
+    prestigeEl.hidden = false;
+    prestigeEl.disabled = bank < prestigeCost();
+    setText(prestigeEl, `[ PRESTIGE ${prestige + 1} · ${fmt(prestigeCost())} Kippen ]`);
     setText(bankEl, `Kippen: ${fmt(bank)}` + (prestige ? ` · Prestige ${prestige}` : ''));
     const next = CHARS.find(c => c.need > smoked);
     setText(rateEl,
@@ -2113,6 +2138,455 @@
     if (triple) setStatus(`${a === '7' ? 'JACKPOT' : 'Drilling'} ${reels.join('')}! +${fmt(win)} Kippen`, 2500);
   }
 
+  // ---- Story-Cutscenes ----------------------------------------------------
+  // Eine Szene für jede Kippen-Story, die keine große Cutscene hat. Jede Story läuft Satz für Satz
+  // im Originalwortlaut durch; jeder Satz ("Beat") hat sein eigenes Bild.
+  //   t:  Titel der Story (darüber wird sie zugeordnet)
+  //   b:  die Sätze der Story in Reihenfolge; [Text, Charakter-ID] färbt den Text in der Farbe des Charakters.
+  //       Ein Beat dauert so lange, wie der Text zum Tippen braucht, plus Lesezeit (siehe beatLen).
+  //   d:  zeichnet ein Bild. g = Baukasten aus cutFrame:
+  //       b = Nummer des laufenden Beats, bt = Ticks seit seinem Beginn, u = sein Fortschritt (0 bis 1),
+  //       at(i) = Tick, an dem Beat i beginnt, L(a, c, i, j) = Wert, der über Beat i (bis Ende Beat j) von a nach c läuft,
+  //       t, flick, put, lerp, banner, S(zeilen, x, y, farbe) = Bild, H(id, x, {eye, mouth, cig, y}) = Kopf,
+  //       D(x, {...}) = Arzt, talk(i) = Mund während Beat i, ground(y) = Bodenlinie, col(id) = Farbe eines Charakters
+  //   p:  optional, einmal pro Tick: (t, add, puff, B) mit B = { b, bt, u, at } wie oben,
+  //       add(x, y, vx, vy, leben, zeichen, farbe, schwerkraft) und puff(x, y, farbe)
+  const beatLen = s => Math.ceil(s.length / 2) + 22;
+  const MINI = [
+    {
+      t: 'Daniels letzte Kippe',
+      b: ['Daniel schwor, das sei seine allerletzte Kippe.', 'Das war vor sechs Jahren.', 'Seitdem raucht er jeden Tag „die allerletzte“.',
+        'Der Arzt nennt es Sucht, Daniel nennt es Konsequenz.'],
+      d: g => {
+        const n = g.b < 2 ? 0 : g.b === 2 ? g.L(1, 2190, 2) : 2190;
+        g.ground();
+        g.H('daniel', 10, { cig: true, mouth: g.talk(0) });
+        g.S(['.-------------.', '|  KALENDER   |', '|             |', "'-------------'"], 36, 5, METAL);
+        g.put(39, 7, 'Tag ' + (g.b < 1 ? 1 : g.b === 1 ? g.L(1, 2190, 1) : 2190), HOT);
+        if (g.b >= 2) g.put(34, 10, '„allerletzte“ Kippen: ' + n.toLocaleString('de-DE'), HOT);
+        if (g.b === 3) {
+          g.D(g.lerp(84, 58, g.at(3), g.at(3) + 12) + (g.bt > 12 && g.bt < 30 && g.flick ? 1 : 0));
+          if (g.bt > 12) g.put(62, 11, 'Sucht.', '#ffffff');
+          if (g.bt > 26) g.put(13, 13, 'Konsequenz.', g.col('daniel'));
+        }
+      },
+      p: (t, add, puff) => { if (t % 2 === 0) puff(31, 18); }
+    },
+    {
+      t: 'Adrian und der Automat',
+      b: ['Adrian warf sein letztes Kleingeld in den Zigarettenautomaten.', 'Der Automat schluckte es, bekam Beine und lief davon.',
+        'Adrian rannte ihm drei Straßen hinterher.', 'Am Ende teilten sie sich eine.'],
+      d: g => {
+        const legs = g.b === 1 || g.b === 2;
+        const ax = g.b === 1 ? g.lerp(44, 90, g.at(1) + 10, g.at(2)) : g.b === 2 ? 58 : 44;
+        g.ground();
+        // drei Straßenschilder ziehen vorbei
+        if (g.b === 2)
+          for (let k = 1; k <= 3; k++) {
+            const sx = 50 + k * 36 - Math.round(g.u * 150);
+            g.S(['.------------.', '| ' + k + '. Straße  |', "'------------'"], sx, 8, HOT);
+            for (let y = 11; y < 24; y++) g.put(sx + 6, y, '|', METAL);
+          }
+        g.H('adrian', 4 + (g.b === 2 ? g.flick : 0), { eye: legs ? 'O' : undefined, cig: g.b === 3 });
+        if (g.b === 0 && g.bt >= 4 && g.bt < 18) g.put(g.lerp(21, 47, g.at(0) + 4, g.at(0) + 18), 19 - Math.round(Math.sin((g.bt - 4) / 14 * Math.PI) * 4), 'o', HOT);
+        g.S(['.---------.', '| KIPPEN  |', '| [] [] []|', '| [] [] []|', '|    o    |', "'---------'"], ax, legs ? 16 : 18, METAL);
+        if (legs) g.S(g.flick ? ['  /|   |\\', ' / |   | \\'] : ['   |\\ /|', '   | X |'], ax, 22, METAL);
+        if (g.b === 3) { g.put(ax + 11, 20, '===', '#f1ead8'); g.put(ax + 14, 20, '*', g.flick ? HOT : EMBER); }
+      },
+      p: (t, add, puff, B) => { if (B.b === 3 && t % 2 === 0) { puff(25, 18); puff(58, 19); } }
+    },
+    {
+      t: 'Mattias Bart',
+      b: ['In Mattias Bart verschwand eines Tages eine brennende Kippe.', 'Er suchte zwei Wochen lang.',
+        'Gefunden hat er sie nie, aber seitdem qualmt der Bart von allein,', 'und Mattia spart ein Vermögen.'],
+      d: g => {
+        g.ground();
+        g.H('mattia', 31, { eye: g.b === 1 ? (g.t % 8 < 4 ? 'o' : 'O') : undefined });
+        if (g.b === 0 && g.u < 0.6) { const y = g.lerp(3, 19, g.at(0), g.at(0) + 30); g.put(37, y, '====', '#f1ead8'); g.put(41, y, '*', g.flick ? HOT : EMBER); }
+        if (g.b === 1) {
+          g.put(52, 9, 'Suche: Tag ' + g.L(1, 14, 1), HOT);
+          const k = (g.t >> 2) % 4;
+          g.put([30, 48, 33, 46][k], [19, 20, 22, 18][k], '?', '#ffffff');
+        }
+        if (g.b === 3) { g.put(52, 9, 'gespart: ' + g.L(0, 9999, 3).toLocaleString('de-DE') + ' €', HOT); if (g.flick) g.put(56, 11, '+€  +€', '#5fd05f'); }
+      },
+      p: (t, add, puff, B) => { if (B.b >= 2) for (const x of [32, 47]) puff(x, 20); }   // am Gesicht vorbei
+    },
+    {
+      t: 'Tomas im Meeting',
+      b: [['Tomas ging „nur kurz eine rauchen“.', 'tomas'], 'Als er zurückkam, war das Meeting vorbei,',
+        'das Projekt abgeschlossen und die Firma verkauft.', 'Seine Krawatte saß trotzdem perfekt.'],
+      d: g => {
+        const min = g.b === 0 ? 0 : g.b === 1 ? g.L(0, 300, 1) : g.b === 2 ? g.L(300, 560, 2) : 560;
+        const sold = g.b > 2 || (g.b === 2 && g.u > 0.5);
+        g.ground();
+        g.H('tomas', 4, { cig: true, mouth: g.talk(0) });
+        g.S(['.----------------------.', '|                      |', '|                      |', '|   []    []    []     |', '|   []    []    []     |',
+          '|         __           |', '|        |  |          |'], 46, 17, METAL);
+        g.put(sold ? 50 : 53, 18, sold ? 'V E R K A U F T' : 'FIRMA GmbH', sold ? '#e0483a' : '#d8d8d8');
+        g.put(48, 12, 'Uhr: ' + (10 + Math.floor(min / 60)) + ':' + String(min % 60).padStart(2, '0'), HOT);
+        g.put(48, 14, g.b === 0 || (g.b === 1 && g.u < 0.6) ? 'Meeting läuft' : g.b === 1 ? 'Meeting vorbei' : 'Projekt abgeschlossen', '#6b7562');
+        // die Krawatte funkelt
+        if (g.b === 3) { g.put(g.flick ? 11 : 15, 22, '*', '#ffffff'); g.put(g.flick ? 15 : 11, 23, '+', '#ffffff'); }
+      },
+      p: (t, add, puff) => { if (t % 2 === 0) puff(25, 18); }
+    },
+    {
+      t: 'Robins Geheimrezept',
+      b: ['Robin kochte ein Fünf-Gänge-Menü,', 'und alle lobten das feine Raucharoma.', 'Sein Geheimnis hat er nie verraten.',
+        'Nur der Rauchmelder kannte es, und der hat längst gekündigt.'],
+      d: g => {
+        const robin = CHARS.find(c => c.id === 'robin'), plates = g.b === 0 ? Math.min(5, 1 + Math.floor(g.u * 5)) : 5;
+        g.ground();
+        g.S(robin.hat, 6, 9, robin.color);
+        g.H('robin', 6, { mouth: g.b === 2 ? '-x-' : undefined });
+        g.S(['  .-------.', ' (|       |)', '  |       |', "  '-------'"], 30, 20, METAL);
+        for (let k = 0; k < plates; k++) { g.put(46 + k * 7, 21, (k + 1) + '.', '#6b7562'); g.put(45 + k * 7, 22, '(___)', '#d8d8d8'); }
+        if (g.b === 1 && g.flick) { g.put(48, 16, 'Mmmh!', HOT); g.put(63, 14, 'Köstlich!', HOT); g.put(70, 18, '<3', '#ff9ec8'); }
+        if (g.b === 2) g.put(25, 13, 'psst ...', '#6b7562');
+        // der Rauchmelder hängt an der Decke; im letzten Satz fällt er herunter und geht mit Koffer
+        if (g.b < 3) g.put(56, 3, '[=(o)=]', '#d8d8d8');
+        else {
+          const x = g.bt < 10 ? 56 : Math.round(56 + (g.bt - 10) * 0.8);
+          g.put(x, g.lerp(3, 19, g.at(3), g.at(3) + 10), '[=(o)=]_[]', '#d8d8d8');
+          if (g.bt > 10 && g.flick && x < 66) g.put(x, 17, 'Ich kündige!', '#e0483a');
+        }
+      },
+      p: (t, add, puff) => { for (let i = 0; i < 2; i++) puff(33 + rnd(0, 6), 19); }
+    },
+    {
+      t: 'Mario und der Rauchmelder',
+      b: ['Mario hat seinen Rauchmelder nie abgeschraubt.', 'Er hat ihm das Rauchen einfach so lange vorgemacht, bis der aufgab.',
+        'Heute piept er nur noch, wenn die Schachtel leer ist.'],
+      d: g => {
+        const gaveUp = g.b === 2 || (g.b === 1 && g.u > 0.7);
+        g.ground();
+        g.H('mario', 14, { cig: true });
+        g.put(46, 3, '[=(o)=]', '#d8d8d8');
+        if (g.b === 0 && g.flick) g.put(54, 3, 'PIEP! PIEP!', '#e0483a');
+        if (g.b === 1 && !gaveUp && g.t % 6 < 3) g.put(54, 3, g.u < 0.4 ? 'PIEP!' : 'piep ...', '#e0483a');
+        if (gaveUp) { g.put(53, 3, '===', '#f1ead8'); g.put(56, 3, '*', g.flick ? HOT : EMBER); }
+        if (g.b === 1 && gaveUp) g.put(46, 5, 'na gut.', '#6b7562');
+        if (g.b === 2) {
+          g.S(['.---------.', '|  LEER   |', '| 0 Stück |', "'---------'"], 58, 19, METAL);
+          if (g.bt % 14 < 5) g.put(58, 3, 'PIEP!', '#e0483a');
+        }
+      },
+      p: (t, add, puff, B) => { if (t % 2 === 0) puff(35, 18); if ((B.b === 2 || (B.b === 1 && B.u > 0.7)) && t % 2) puff(56, 2); }
+    },
+    {
+      t: 'Feuer?',
+      b: ['Daniel und Adrian trafen sich an der Bushaltestelle.', '„Hast du Feuer?“ – „Nein. Hast du Kippen?“ – „Nein.“',
+        'Sie standen zwanzig Minuten schweigend im Regen.', 'Es war die schönste Raucherpause ihres Lebens.'],
+      d: g => {
+        const first = g.b === 1 && (g.u < 0.2 || (g.u > 0.32 && g.u < 0.5));
+        g.ground();
+        g.H('daniel', g.lerp(-18, 6, g.at(0), g.at(0) + 14), { mouth: first && g.flick ? '--o' : '---' });
+        g.H('adrian', g.lerp(84, 52, g.at(0), g.at(0) + 14), { mouth: g.b === 1 && !first && g.u < 0.6 && g.flick ? '--o' : '---' });
+        g.S([' .---.', ' | H |', " '---'"], 35, 9, HOT);
+        for (let y = 12; y < 24; y++) g.put(38, y, '|', METAL);
+        if (g.b >= 2) g.put(29, 5, 'Wartezeit: ' + (g.b === 2 ? g.L(0, 20, 2) : 20) + ' min', HOT);
+        if (g.b === 3 && g.flick) { g.put(27, 13, '<3', '#ff9ec8'); g.put(47, 13, '<3', '#ff9ec8'); }
+      },
+      p: (t, add, puff, B) => { if (B.b >= 2) for (let i = 0; i < 4; i++) add(rnd(0, CW + 8), 2, -0.4, 1.3, 17, '/', '#4a9bff'); }
+    },
+    {
+      t: 'Mattia beim Arzt',
+      b: [['Der Arzt schüttelte den Kopf: „Sie müssen sofort aufhören.“', 'none'], 'Mattia nickte, ging raus und zündete sich eine an.',
+        ['Der Arzt kam hinterher: „Ich meinte: nicht ohne mich.“', 'none']],
+      d: g => {
+        const mx = g.b === 0 ? 41 : g.b === 1 ? g.lerp(41, 2, g.at(1) + 10, g.at(1) + 30) : 2;
+        const dx = g.b < 2 ? 61 : g.lerp(61, 22, g.at(2), g.at(2) + 24);
+        g.ground();
+        // Praxis rechts, links von der Tür ist draußen
+        g.put(43, 5, 'P R A X I S', '#6b7562');
+        for (let y = 4; y < 24; y++) g.put(39, y, '|', METAL);
+        g.D(dx + (g.b === 0 && g.bt < 24 && g.flick ? 1 : 0), { cig: g.b === 2 && g.bt > 28, mouth: g.b === 0 || g.b === 2 ? g.talk(g.b) : '---' });
+        g.H('mattia', mx, { cig: (g.b === 1 && g.bt > 32) || g.b === 2, y: g.b === 1 && g.bt < 10 && g.flick ? 16 : 15 });
+      },
+      p: (t, add, puff, B) => {
+        if (((B.b === 1 && B.bt > 32) || B.b === 2) && t % 2 === 0) puff(23, 18);
+        if (B.b === 2 && B.bt > 28 && t % 2) puff(43, 18);
+      }
+    },
+    {
+      t: 'Tomas und die Aliens',
+      b: ['Die Aliens flogen vierzig Lichtjahre weit zur Erde,', 'um die Menschheit zu warnen.', 'Dann bot Tomas ihnen eine Kippe an.',
+        'Jetzt kreisen sie über der Tankstelle und fragen, ob jemand eine übrig hat.'],
+      d: g => {
+        const circle = g.b === 3;
+        const ux = g.b === 0 ? g.L(84, 44, 0) : circle ? Math.round(50 + Math.sin(g.t / 6) * 14) : 44;
+        const uy = g.b === 0 ? g.L(1, 6, 0) : circle ? Math.round(6 + Math.cos(g.t / 6) * 2) : 6;
+        for (const [x, y] of [[6, 4], [20, 8], [34, 3], [70, 9], [76, 5], [58, 12]]) g.put(x, y, (x + (g.t >> 2)) % 2 ? '.' : '+', '#6b7562');
+        g.ground();
+        g.S(['.------------.', '| TANKSTELLE |', "'------------'", '      ||', '      ||', '      ||'], 54, 18, METAL);
+        if (g.b >= 2) g.H('tomas', g.lerp(-18, 4, g.at(2), g.at(2) + 10), { cig: true });
+        g.S(['    _.-._', '  .-(ooo)-.', "  '-.___.-'"], ux, uy, '#9ad0ff');
+        if (g.b === 0) g.put(ux + 12, uy + 1, '- - -  -  -', '#6b7562');
+        if (g.b === 1) { g.S(['  /!\\', ' /_!_\\'], ux + 2, uy + 4, g.flick ? HOT : '#e0483a'); g.put(ux - 6, uy + 7, 'ACHTUNG, MENSCHHEIT!', HOT); }
+        // die angebotene Kippe schwebt zum Ufo hinauf
+        if (g.b === 2 && g.bt > 14) { g.put(g.lerp(28, ux + 2, g.at(2) + 14, g.at(3)), g.lerp(17, uy + 3, g.at(2) + 14, g.at(3)), '==*', '#f1ead8'); }
+        if (circle) { g.put(ux + 11, uy + 1, '==', '#f1ead8'); g.put(ux + 13, uy + 1, '*', g.flick ? HOT : EMBER); if (g.t % 16 < 8) g.put(ux - 2, uy + 4, '„Noch eine übrig?“', '#9ad0ff'); }
+      },
+      p: (t, add, puff, B) => { if (B.b >= 2 && t % 2 === 0) puff(25, 18); if (B.b === 3) puff(63 + Math.sin(t / 6) * 14, 6, '#9ad0ff'); }
+    },
+    {
+      t: 'JakobFuckingJones',
+      b: ['Als JakobFuckingJones seine erste Kippe anzündete,', 'ging die Sonne freiwillig unter.', 'Er raucht nicht, die Zigaretten rauchen ihn, aus Respekt.',
+        'Auf seinem Kippenberg steht ein Schild: „Rauchen verboten.“', 'Es gilt für alle außer ihm.'],
+      d: g => {
+        const jk = CHARS.find(c => c.id === 'jakob'), lit = g.b > 0 || g.u > 0.5, sy = g.b === 0 ? 3 : g.L(3, 24, 1);
+        if (g.b < 2) ['\\|/', '--O--', '/|\\'].forEach((l, i) => { if (sy + i < 24) g.put(64 - (l.length >> 1), sy + i, l, HOT); });
+        g.ground();
+        if (g.b >= 3) {
+          const y = g.b === 3 ? g.lerp(24, 19, g.at(3), g.at(3) + 8) : 19;
+          g.S(['.------------------.', '| RAUCHEN VERBOTEN |', "'------------------'", '        ||', '        ||'].slice(0, 24 - y), 3, y, '#e0483a');
+        }
+        if (g.b === 4) g.put(3, 17, '(gilt nicht für ihn)', HOT);
+        // kleine Zigaretten verneigen sich vor ihm und rauchen
+        if (g.b === 2) { g.put(8, 22 + g.flick, '=*   =*   =*', '#f1ead8'); g.put(58, 22 + g.flick, '*=   *=   *=', '#f1ead8'); }
+        g.S(jk.hatFrames[(g.t / 3 | 0) % jk.hatFrames.length], 31, 9, jk.hatColor);
+        g.H('jakob', 31, { cig: lit });
+        if (g.b === 0 && !lit && g.flick) g.put(53, 18, "*'*", HOT);
+      },
+      p: (t, add, puff, B) => {
+        if ((B.b > 0 || B.u > 0.5) && t % 2 === 0) puff(52, 18);
+        if (B.b === 2 && t % 3 === 0) { puff(8 + 5 * Math.floor(rnd(0, 3)) + 1, 21); puff(58 + 5 * Math.floor(rnd(0, 3)), 21); }
+      }
+    },
+    {
+      t: 'Der Erfasser',
+      b: ['Der Erfasser erfasst alles: jede Kippe, jeden Zug, jeden Huster.', 'Nur seine eigene Schachtel hat er nie erfasst.',
+        'Deshalb ist sie laut Statistik seit Jahren voll.'],
+      d: g => {
+        g.ground();
+        g.H('none', 4, { cig: g.b >= 1 });
+        g.S(['.--------------------------------.', ...Array(9).fill('|                                |'), "'--------------------------------'"], 40, 8, METAL);
+        g.put(43, 10, 'Kippen:   ' + (g.t * g.t * 37).toLocaleString('de-DE'), '#d8d8d8');
+        g.put(43, 12, 'Züge:     ' + (g.t * g.t * 311).toLocaleString('de-DE'), '#d8d8d8');
+        g.put(43, 14, 'Huster:   ' + (g.t * 53).toLocaleString('de-DE'), '#d8d8d8');
+        if (g.b === 1) g.put(43, 17, 'Eigene Schachtel:  ???', '#e0483a');
+        if (g.b === 2) g.put(43, 17, 'Eigene Schachtel:  20 / 20', g.flick ? '#ffffff' : HOT);
+      },
+      p: (t, add, puff, B) => { if (B.b >= 1 && t % 2 === 0) puff(25, 18); }
+    },
+    {
+      t: 'Robin und der Kippenberg',
+      b: ['Robin wollte den Kippenberg besteigen.', 'Auf halber Höhe machte er Raucherpause.', 'Der Berg wuchs dabei schneller, als Robin klettern konnte.',
+        'Er ist bis heute unterwegs.'],
+      d: g => {
+        const py = g.b < 2 ? 17 : g.b === 2 ? g.L(17, 6, 2) : g.L(6, 3, 3);
+        const hy = g.b === 0 ? g.L(23, 20, 0) : g.b < 3 ? 20 : g.L(20, 17, 3);
+        for (let y = py; y < CH; y++)
+          for (let x = Math.max(0, 40 - (y - py) * 2); x <= Math.min(CW - 1, 40 + (y - py) * 2); x++) {
+            const [c, col] = pileCell(x, y + py);
+            g.ch[y][x] = c; g.cl[y][x] = col || '#cfc6b0';
+          }
+        const x = Math.max(0, 40 - (hy - py) * 2 - 3);
+        g.put(x, hy - 2, ' o', g.col('robin')); g.put(x, hy - 1, '/|\\', g.col('robin'));
+        if (g.b === 1 || g.b === 2) g.put(x + 3, hy - 2, '=*', g.flick ? HOT : EMBER);
+        if (g.b === 3) g.put(60, 8, 'unterwegs seit Tag ' + g.L(1, 9999, 3).toLocaleString('de-DE'), HOT);
+      }
+    },
+    {
+      t: 'Marios Glückskippe',
+      b: ['Mario drehte seine Glückskippe in der Schachtel um.', 'Dann drehte er vorsichtshalber alle anderen auch um.',
+        'Seitdem hat er zwanzig Glückskippen und kein Glück, aber ein gutes Gefühl.'],
+      d: g => {
+        const turnedN = g.b === 0 ? (g.u > 0.5 ? 1 : 0) : g.b === 1 ? Math.min(10, 1 + Math.floor(g.u * 10)) : 10;
+        g.ground();
+        g.H('mario', 4, { eye: g.b === 2 ? '^' : undefined });
+        g.S(['.-------------------.', '|                   |', '|                   |', '|-------------------|', '|                   |',
+          '|   G L Ü C K       |', '|                   |', "'-------------------'"], 46, 13, HOT);
+        for (let k = 0; k < 10; k++)
+          for (const y of [14, 15]) g.put(47 + 2 * k, y, k < turnedN ? 'o' : '#', k < turnedN ? '#f1ead8' : '#c98f4e');
+        if (g.b === 2) { g.put(46, 22, 'Glückskippen: 20 · Glück: 0', '#6b7562'); if (g.flick) g.put(22, 14, '<3', '#ff9ec8'); }
+      }
+    },
+    {
+      t: 'Der KippenDieb',
+      b: ['Der KippenDieb stahl Daniel eine ganze Stange.', 'Daniel merkte es erst nach drei Wochen, weil er gerade „aufgehört“ hatte.',
+        'Der Dieb brachte sie freiwillig zurück.', 'Das schlechte Gewissen ging noch, aber der Husten war zu stark.'],
+      d: g => {
+        const b = BOSSES[0], a0 = g.at(0), a2 = g.at(2);
+        const x = g.b === 0 ? (g.bt < 16 ? g.lerp(80, 50, a0, a0 + 12) : g.lerp(50, 84, a0 + 18, g.at(1))) : g.b === 1 ? 84 : g.lerp(84, 50, a2, a2 + 14);
+        const here = (g.b === 0 && g.bt < 14) || g.b === 3 || (g.b === 2 && g.bt > 16);
+        g.ground();
+        g.H('daniel', 4, { eye: g.b === 0 ? '-' : g.b === 1 && g.u > 0.5 ? 'O' : undefined });
+        if (g.b === 0) g.put(20, 12 - (g.t >> 2) % 3, 'z', g.col('daniel'));
+        if (g.b === 1) { g.put(34, 8, 'Woche ' + g.L(1, 3, 1), HOT); if (g.u > 0.5) g.put(22, 12, '?!', '#ffffff'); }
+        if (here) g.S([' .------.', ' |STANGE|', " '------'"], 26, 21, HOT);
+        g.S(b.art, x, 14, b.color);
+        if (g.b === 3 && g.flick) g.put(x + 3, 12, '*hust* *hust*', '#9aa390');
+      }
+    },
+    {
+      t: 'Adrian hört auf',
+      b: ['Adrian las ein Buch darüber, wie man mit dem Rauchen aufhört.', 'Es war so spannend, dass er dabei zwei Schachteln rauchte.',
+        'Die Fortsetzung hat er schon vorbestellt.'],
+      d: g => {
+        g.ground();
+        g.H('adrian', 4, { cig: g.b >= 1 });
+        g.S(['  ______________ ______________', ' /  ENDLICH     |  Kapitel ' + String(1 + (g.t >> 3)).padEnd(2) + '  \\', '|   NICHT-      |   ~~~~ ~~~   |',
+          '|   RAUCHER     |   ~~ ~~~~~   |', ' \\______________|______________/'], 40, 17, '#d8d8d8');
+        if (g.b >= 1) g.put(44, 13, 'geraucht: ' + (g.b === 1 ? g.L(0, 2, 1) : 2) + ' Schachteln', HOT);
+        if (g.b === 2) g.S(['.--------------.', '|    BAND 2    |', '| vorbestellt! |', "'--------------'"], 60, 6, HOT);
+      },
+      p: (t, add, puff, B) => { if (B.b >= 1) puff(25, 18); }
+    },
+    {
+      t: 'Tomas im Nichtraucherabteil',
+      b: ['Tomas setzte sich versehentlich ins Nichtraucherabteil.', 'Aus Höflichkeit hielt er die Kippe aus dem Fenster.',
+        'Der Zug hatte danach vierzig Minuten Verspätung', 'wegen „Rauchentwicklung auf der Strecke“.'],
+      d: g => {
+        const x = g.L(-4, 26, 0, 3), late = g.b < 2 ? 0 : g.b === 2 ? g.L(0, 40, 2) : 40;
+        g.S(['.------------------------------.', '| ICE 608          +' + String(late).padStart(2) + ' min     |',
+          '| ' + (g.b === 3 ? 'Grund: Rauch auf der Strecke' : '                            ') + ' |', "'------------------------------'"], 46, 4, HOT);
+        g.S(['  ______________________________', ' |  []   []   []   []   []      \\', ' |  N I C H T R A U C H E R      \\', ' |________________________________\\',
+          '    (o)(o)               (o)(o)'], x, 17, '#d8d8d8');
+        if (g.b >= 1) g.put(x + 11, 17, '=*', g.flick ? HOT : EMBER);
+        g.put(0, 22, '='.repeat(CW), '#4a4f45');
+      },
+      p: (t, add, puff, B) => {
+        if (B.b < 1) return;
+        const x = Math.round(-4 + 30 * Math.min(1, (t - B.at(0)) / (B.at(4) - B.at(0)))) + 12;
+        for (let i = 0; i < (B.b === 3 ? 8 : 3); i++) add(x, 16, rnd(-1.4, -0.3), rnd(-0.5, 0), Math.round(rnd(16, 34)), 'oO()~.', '#9aa390');
+      }
+    },
+    {
+      t: 'Mattias Feuerzeuge',
+      b: ['Mattia besitzt dreihundert Feuerzeuge.', 'Keines davon hat er gekauft.', 'Keines davon funktioniert.', ['Er sagt, es gehe ihm ums Prinzip.', 'mattia']],
+      d: g => {
+        const shown = g.b === 0 ? Math.floor(g.u * 43) : 42;
+        g.ground();
+        g.H('mattia', 4, { mouth: g.talk(3) });
+        for (let i = 0; i < shown; i++) {
+          const r = Math.floor(i / 14), c = i % 14;
+          g.put(34 + c * 3, 9 + r * 3, 'i', METAL);
+          if (g.b >= 2 && (c * 7 + r * 13 + g.t) % 9 === 0) g.put(34 + c * 3, 8 + r * 3, '*', HOT);   // Funke, aber nie eine Flamme
+        }
+        g.put(34, 18, 'Feuerzeuge: ' + (g.b === 0 ? g.L(0, 300, 0) : 300), '#d8d8d8');
+        if (g.b >= 1) g.put(34, 20, 'davon gekauft: 0', '#d8d8d8');
+        if (g.b >= 2) g.put(34, 22, 'davon funktionieren: 0', '#e0483a');
+      }
+    },
+    {
+      t: 'Der Malboro Mann',
+      b: ['Der Malboro Mann ritt in den Sonnenuntergang.', 'Nach zehn Metern musste das Pferd husten.',
+        'Seitdem reitet er nur noch bergab und nennt es Freiheit.'],
+      d: g => {
+        const x = g.b === 0 ? g.L(2, 26, 0) : g.b === 1 ? 26 : g.L(26, 60, 2), y = g.b < 2 ? 19 : g.L(19, 23, 2);
+        g.S(['\\|/', '--O--', '/|\\'], 66, 4, HOT);
+        // ebene Strecke, ab Spalte 36 geht es bergab
+        for (let c = 0; c < CW; c++) { const gy = c < 36 ? 24 : Math.min(CH - 1, 24 + ((c - 36) >> 3)); g.ch[gy][c] = '_'; g.cl[gy][c] = '#6b5a3a'; }
+        if (g.b === 1) g.put(4, 26, '|<-------- 10 m -------->|', '#6b7562');
+        g.S(['       _o_', '  ,___/|', ' ~|     )', '  |_/\\_|', g.flick && g.b !== 1 ? '  / \\ / \\' : '  | |  | |'], x, y, WOOD);
+        if (g.b === 1 && g.flick) g.put(x + 11, y, '*hust* *hust*', '#9aa390');
+        if (g.b === 2 && g.bt > 12) g.put(x, y - 2, 'FREIHEIT!', HOT);
+      }
+    },
+    {
+      t: 'Merz und das Bürgergeld',
+      b: ['Merz wollte nur kurz vorbeischauen.', 'Jemand klickte ihn an, und fünftausend Kippen fielen aus seinem Jackett.',
+        'Er versteht bis heute nicht, wie das passieren konnte,', 'und kommt trotzdem immer wieder.'],
+      d: g => {
+        const a3 = g.at(3);
+        const x = g.b === 0 ? g.L(84, 36, 0) : g.b < 3 ? 36 : g.bt < 16 ? g.lerp(36, -8, a3, a3 + 14) : g.lerp(84, 36, a3 + 16, a3 + 32);
+        const walking = g.b === 0 || (g.b === 3 && g.bt < 32);
+        g.ground();
+        g.S(['  ___', g.b === 1 || g.b === 2 ? ' (O_O)' : ' (o_o)', ' /[€]\\', walking && g.flick ? '  | |' : '  / \\'], x, 20, '#d8d8d8');
+        if (g.b === 1 && g.bt < 12) g.put(44, 21, '<-- KLICK', HOT);
+        if (g.b === 1 && g.bt >= 10) g.put(31, 14, '+5.000 Kippen', HOT);
+        if (g.b === 2) g.put(38, 18, g.flick ? '?' : '??', '#ffffff');
+      },
+      p: (t, add, puff, B) => {
+        if (B.b === 1 && B.bt >= 10 && B.u < 0.8)
+          for (let i = 0; i < 6; i++) add(39, 21, rnd(-1.6, 1.6), rnd(-1.4, -0.3), 90, '=', Math.random() < 0.3 ? '#c98f4e' : '#f1ead8', 0.12);
+      }
+    },
+    {
+      t: 'Jakob und der Vulkan',
+      b: ['Der Vulkan rauchte seit zehntausend Jahren.', 'Dann stellte sich JakobFuckingJones daneben und zündete sich eine an.',
+        'Der Vulkan hat aus Scham aufgehört.'],
+      d: g => {
+        const jk = CHARS.find(c => c.id === 'jakob'), x = g.b === 0 ? -24 : g.b === 1 ? g.lerp(-20, 4, g.at(1), g.at(1) + 20) : 4;
+        g.ground();
+        g.S(['       /\\__/\\', '      /      \\', '     /        \\', '    /          \\', '   /            \\', '  /              \\', ' /________________\\'], 46, 17, '#b0603a');
+        if (g.b === 0) g.put(46, 26, 'raucht seit: 10.000 Jahren', '#6b7562');
+        if (g.b === 2) { g.put(51, 20, '//      //', '#e0483a'); g.put(51, 15, '*schäm*', '#d8d8d8'); }
+        g.S(jk.hatFrames[(g.t / 3 | 0) % jk.hatFrames.length], x, 9, jk.hatColor);
+        g.H('jakob', x, { cig: g.b === 2 || (g.b === 1 && g.bt > 26) });
+      },
+      p: (t, add, puff, B) => {
+        if (B.b < 2) for (let i = 0; i < 5; i++) add(56 + rnd(-2, 2), 16, rnd(-0.4, 0.4), rnd(-0.8, -0.3), Math.round(rnd(14, 30)), 'O@o()~.', '#9aa390');
+        if ((B.b === 2 || (B.b === 1 && B.bt > 26)) && t % 2 === 0) puff(25, 18);
+      }
+    },
+    {
+      t: 'Rauchzeichen',
+      b: ['Robin wollte Daniel per Rauchzeichen zum Grillen einladen.', 'Daniel antwortete ebenfalls mit Rauchzeichen.',
+        'Die Feuerwehr kam mit drei Löschzügen und blieb zum Essen.'],
+      d: g => {
+        const x = g.b < 2 ? 90 : g.lerp(84, 36, g.at(2), g.at(2) + 16), eating = g.b === 2 && g.bt > 22;
+        g.ground();
+        g.H('robin', 2);
+        g.H('daniel', 62);
+        g.S(['\\_____/', ' |   |'], 21, 22, METAL);
+        if (eating) { g.put(22, 21, '~~~~~', '#c98f4e'); if (g.flick) g.put(38, 17, 'Mahlzeit!', HOT); }
+        g.S([' ____________', '| FEUERWEHR  |\\__', '|____________|___|', '   (o)      (o)'], x, 20, '#e0483a');
+        if (g.b === 2) g.put(x + 1, 18, 'Löschzug 1, 2 und 3', '#e0483a');
+      },
+      p: (t, add, puff, B) => {
+        if (B.b < 2 && t % 6 === 0) add(24, 21, 0, -0.5, 30, 'oOO()', '#9aa390');
+        if (B.b === 1 && t % 6 === 3) add(58, 14, 0, -0.5, 24, 'oOO()', '#a8cdf0');
+      }
+    },
+    {
+      t: 'Die Wette',
+      b: ['Mario wettete mit Tomas, wer länger ohne Kippe aushält.', 'Nach vier Minuten gingen beide „kurz Luft schnappen“.',
+        'Sie trafen sich hinter dem Haus und einigten sich auf Unentschieden.'],
+      d: g => {
+        const a1 = g.at(1), a2 = g.at(2), half = Math.round((a1 + a2) / 2);
+        const sec = g.b === 0 ? g.L(0, 150, 0) : g.b === 1 ? Math.min(240, g.lerp(150, 240, a1, half)) : 240;
+        const mx = g.b === 0 ? 2 : g.b === 1 ? g.lerp(2, -20, half, a2) : g.lerp(-20, 12, a2, a2 + 12);
+        const tx = g.b === 0 ? 62 : g.b === 1 ? g.lerp(62, 84, half, a2) : g.lerp(84, 50, a2, a2 + 12);
+        const met = g.b === 2 && g.bt > 14;
+        g.ground();
+        g.H('mario', mx, { cig: met });
+        g.H('tomas', tx, { cig: met });
+        g.put(31, 4, 'ohne Kippe:  ' + (sec / 60 | 0) + ':' + String(sec % 60).padStart(2, '0'), sec >= 240 ? '#e0483a' : HOT);
+        if (g.b === 2) g.S(['.-----------------.', '| HINTER DEM HAUS |', "'-----------------'"], 31, 7, METAL);
+        if (met && g.bt > 30) g.banner([[12, 'U N E N T S C H I E D E N', HOT]]);
+      },
+      p: (t, add, puff, B) => { if (B.b === 2 && B.bt > 14 && t % 2 === 0) { puff(33, 18); puff(71, 18); } }
+    },
+    {
+      t: 'Daniel und der Hamster',
+      b: ['Daniel kaufte einen Hamster fürs Rauchrad.', 'Der Hamster lief drei Tage,', 'dann verlangte er Urlaub, Weihnachtsgeld und eine eigene Marke.',
+        'Daniel raucht seitdem wieder selbst.'],
+      d: g => {
+        const strike = g.b >= 2;
+        g.ground();
+        g.H('daniel', 4, { cig: g.b === 3 });
+        g.S(g.b === 1 && g.flick ? ['   .-"-.', '  / \\|/ \\', ' | --o-- |', '  \\ /|\\ /', "   '-.-'"] : ['   .-"-.', '  /  |  \\', ' | \\-o-/ |', '  \\  |  /', "   '-.-'"], 38, 18, METAL);
+        if (g.b === 0) g.put(g.L(76, 40, 0), 23, "c'.'", '#e0b070');
+        if (g.b === 1) { g.put(40, 23, "c'.'", '#e0b070'); g.put(38, 14, 'Tag ' + g.L(1, 3, 1), HOT); }
+        if (strike) {
+          g.S([' .--------.', ' | STREIK |', " '--------'", '     |', "  c'.'"], 56, 19, '#e0b070');
+          ['Urlaub!', 'Weihnachtsgeld!', 'Eigene Marke!'].forEach((s, i) => { if (g.b === 3 || g.u > i * 0.25) g.put(54, 11 + i * 2, s, HOT); });
+        }
+      },
+      p: (t, add, puff, B) => { if (B.b === 3 && t % 2 === 0) puff(25, 18); else if (B.b === 1 && t % 3 === 0) puff(42, 17); }
+    }
+  ];
+  // Beat, der zum Tick t einer Story-Szene läuft: b = Nummer, bt = Ticks seit Beginn, u = Fortschritt, at(i) = Starttick
+  function miniBeat(scene, t) {
+    const at = scene.at, n = at.length - 1;
+    let b = 0;
+    while (b < n - 1 && t >= at[b + 1]) b++;
+    return { b, bt: Math.max(0, t - at[b]), u: Math.max(0, Math.min(1, (t - at[b]) / (at[b + 1] - at[b]))), at: i => at[Math.min(i, n)] };
+  }
+
   // ---- Cutscenes ----------------------------------------------------------
   // Ich-Perspektive: Schachtel aufklappen, Zigarette herausziehen, anzünden.
   // Eigenes Raster über der ganzen Seite; t zählt die Ticks seit Beginn.
@@ -2126,6 +2600,7 @@
   //   helmut:   nach dem ersten Besuch von Helmut Schmidt; Plenarsaal, das Rauchverbot fällt, Finale in Schwarz-Rot-Gold
   //   obst, eins: beim Kauf der Story mit Index story (E-Zigaretten-Story bzw. letzte Story)
   //   rally:    geheim, per Tastenfolge (SECRET); ein gelbes Afri-Rallyauto rast vorbei Richtung Kapstadt
+  //   st0..st23: Szenen zu den übrigen Storys, Satz für Satz, beim Kauf der Story (mini = Eintrag aus MINI)
   // always: gilt ohne Eintrag im Spielstand als gesehen (das Intro hat jeder hinter sich)
   // lightAt: ab diesem Tick blendet der Hintergrund ins Helle (#intro.light)
   // have:   gilt als gesehen, sobald die Bedingung erfüllt ist (für Spielstände von vor der Cutscene)
@@ -2225,7 +2700,16 @@
         [4, 26, 'Irgendwo zwischen hier und Kapstadt.'], [28, 44, '*brrrrrRRRRRRRR*'], [58, 74, '*schnipp*'],
         [80, 122, 'Nächster Halt: Kapstadt. Nächste Kippe: jetzt.']
       ]
-    }
+    },
+    // Szenen zu den übrigen Storys (siehe MINI); at = Starttick jedes Satzes, der letzte Eintrag ist das Ende
+    ...MINI.map(m => {
+      const story = STORIES.findIndex(s => s.t === m.t), txt = c => Array.isArray(c) ? c[0] : c, at = [4];
+      for (const c of m.b) at.push(at[at.length - 1] + beatLen(txt(c)));
+      return {
+        id: 'st' + story, name: m.t, end: at[at.length - 1] + 4, story, mini: m, at,
+        captions: m.b.map((c, i) => [at[i], at[i + 1], txt(c), ...(Array.isArray(c) ? [CHARS.find(k => k.id === c[1]).color || '#d8d8d8'] : [])])
+      };
+    })
   ];
   const introEl = document.getElementById('intro');
   const introSceneEl = document.getElementById('introscene');
@@ -2253,7 +2737,27 @@
     const banners = [];
     const banner = lines => banners.push(...lines);
 
-    if (scene.id === 'rally') {
+    if (scene.mini) {
+      const who = id => CHARS.find(c => c.id === id), B = miniBeat(scene, t);
+      const S = (lines, x, y, c) => lines.forEach((l, i) => put(Math.round(x), Math.round(y) + i, l, c));
+      // Kopf eines Charakters, oberste Zeile y; cig: mit brennender Zigarette im Mund
+      const H = (id, x, o = {}) => {
+        const c = who(id), y = o.y === undefined ? 15 : o.y, col = c.color || '#b8c4a6';
+        x = Math.round(x);
+        c.rows.map(r => r.replace('{E}', o.eye || c.eye).replace('{M}', o.mouth || '---')).forEach((l, i) => put(x, y + i, l, col));
+        if (o.cig) { put(x + 15, y + 4, '[#]===', '#f1ead8'); put(x + 15, y + 4, '[#]', '#c98f4e'); put(x + 21, y + 4, '*', flick ? HOT : EMBER); }
+      };
+      scene.mini.d({
+        t, flick, put, lerp, banner, ch, cl, S, H, ...B,
+        L: (a, c, i, j = i) => lerp(a, c, B.at(i), B.at(j + 1)),
+        // der Arzt: ein Kopf mit Arztkappe
+        D: (x, o) => { S(['     .-------.', '     |   +   |'], x, 13, '#ffffff'); H('none', x, o); },
+        // Mund bewegt sich, solange der Text von Beat i getippt wird
+        talk: i => B.b === i && flick && B.bt < (scene.captions[i][2].length >> 1) + 4 ? '--o' : '---',
+        ground: (y = 24) => put(0, y, '_'.repeat(CW), '#4a4f45'),
+        col: id => who(id).color || '#b8c4a6'
+      });
+    } else if (scene.id === 'rally') {
       // Blick vom Straßenrand: Savanne, Horizont in Zeile 14, davor die Piste (Zeile 19 bis 25)
       const AFRI = '#d9a520', SAND = '#b98a55';
       ['\\|/', '--*--', '/|\\'].forEach((l, i) => put(22 - (l.length >> 1), 3 + i, l, HOT));
@@ -2354,6 +2858,8 @@
           put(Math.round(fx(i) + 3 + (40 - fx(i) - 3) * f * f + Math.sin((r + t) * 0.5) * (1 - f)), 15 - r, r < 3 ? '.' : ':', c.color);
         }
       });
+      // die Namen aus der Story, solange der erste Satz läuft
+      if (t < 30) banner([[21, 'Daniel · Adrian · Mattia · Tomas · Robin · Mario · Jakob', '#d8d8d8']]);
       // der Erfasser steht daneben und zählt
       if (19 - rise >= 7) { put(66, 19 - rise, ' o', one ? '#ffffff' : '#b8c4a6'); put(66, 20 - rise, '/|\\', one ? '#ffffff' : '#b8c4a6'); }
       if (t >= 34 && t < 126)
@@ -2953,6 +3459,11 @@
         sm.push({ x: 40 + (Math.random() < 0.5 ? -1 : 1) * rnd(10, 17), y: 28, vx: rnd(-0.1, 0.1), vy: rnd(-1.3, -0.6), life, max: life,
           cs: "|^'.", color: '#ffe14a' });
       }
+    if (scene.mini && scene.mini.p)
+      scene.mini.p(t,
+        (x, y, vx, vy, life, cs, color, g) => sm.push({ x, y, vx, vy, life, max: life, cs, color, g }),
+        (x, y, color = '#9aa390') => sm.push({ x, y, vx: rnd(-0.15, 0.2), vy: rnd(-0.4, -0.25), life: 24, max: 24, cs: '.:o~', color }),
+        miniBeat(scene, t));
     if (scene.id === 'rally') {
       const dust = (x, y, n) => {
         for (let i = 0; i < n; i++) {
