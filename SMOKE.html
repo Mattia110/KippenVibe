@@ -594,6 +594,8 @@
   // Übelkeit: alle 10 Minuten muss der Raucher kotzen. Arzt: kommt hin und wieder vorbei.
   const PUKE_EVERY = 600000, PUKE_TICKS = 40, PUKE = '#8fbf3a';
   let pukeT = 0, lastPuke = performance.now();
+  // kleine Einlage, die gerade läuft: { g: Eintrag aus GAGS, t: Ticks seit Beginn }; nextGag = Loop-Tick der nächsten
+  let gag = null, nextGag = 220;
   const DOC_STOP = 30;           // Spalte, an der der Arzt stehen bleibt
   let doc = null, nextDoc = 400; // nextDoc in Loop-Ticks (erster Besuch nach ~35 s)
   // Besucher: laufen, hüpfen, fahren oder fliegen ab und zu einmal durchs Bild.
@@ -877,6 +879,15 @@
     if (phase === 'cough') mouth = t % 2 ? '--O' : '--o';
     let eye = closed ? '-' : char.eye;
     if (pukeT > 0) { eye = 'x'; mouth = pukeT % 2 ? '--O' : '--0'; }
+    else if (gag) {
+      const k = gag.t, id = gag.g.id;
+      if (id === 'wink') { eye = k < 5 ? char.eye : k < 14 || k >= 19 ? 'O' : '-'; if (k >= 5) mouth = '--)'; }
+      else if (id === 'beer') { eye = k < 8 ? char.eye : '^'; mouth = '--D'; }
+      else if (id === 'yawn') { eye = '-'; mouth = k < 6 || k >= 24 ? '--o' : '--O'; }
+      else if (id === 'sneeze') { eye = k < 18 ? (k % 6 < 3 ? '-' : char.eye) : '<'; mouth = k < 18 ? '--o' : '--O'; }
+      else if (id === 'whistle') mouth = k % 4 < 2 ? '--o' : '--O';
+      else if (id === 'kiss') { eye = '^'; mouth = k < 8 ? '--*' : '--o'; }
+    }
     const rows = char.rows.map(r => r.replace('{E}', eye).replace('{M}', mouth));
     // Sonnenbrille der Marke über die Augenpartie legen
     if (brand.shades) rows[2] = rows[2].slice(0, 10) + '--##' + rows[2].slice(14);
@@ -2032,7 +2043,28 @@
   /    MANGO-EIS 20mg   \
  |   |               |   |
  |___|               |___|
-     |______| |______|`) }
+     |______| |______|`) },
+    { name: 'Kippen Dino', hp: 800000, reward: 2000000, color: '#5fd05f', art: bossArt(String.raw`
+               ____
+              / o  \___
+             |      ___)====*
+     /\      |     /
+    /  \____/     |
+   /               \__
+  /    ___    __    __)
+ /___/    |  |  |  |
+          |__|  |__|`) },
+    { name: 'Kippen Einhorn', hp: 10000000, reward: 10000000, color: '#ff9ec8', art: bossArt(String.raw`
+          \
+           \  ,~~,
+        ,~~'\/ o  \____
+       ( ~~         ___)===*
+        ( ~~   ____/
+         ) ~  /
+     ,--'    (___
+    /             \~~
+   |   |  |   |    |~~~
+   |___|  |___|____|`) }
   ];
   // Leben und Belohnung wachsen mit dem Einkommen (Kippen/s inkl. Slots), gemessen beim Auftauchen:
   //   Leben      = Grundwert (hp)     + Einkommen x secs
@@ -2043,7 +2075,9 @@
     { secs: 40,  pay: 10, time: 30 },
     { secs: 60,  pay: 15, time: 40 },
     { secs: 90,  pay: 20, time: 50 },
-    { secs: 150, pay: 30, time: 60 }
+    { secs: 150, pay: 30, time: 60 },
+    { secs: 220, pay: 45, time: 70 },
+    { secs: 300, pay: 60, time: 80 }
   ];
   const BOSS_WARN = 10000;            // so viele ms vor dem Auftauchen erscheint die Warnung
   const BOSS_GAP = [60000, 120000];   // Pause zwischen zwei Bossen in ms (1 bis 2 min, nach der Uhr)
@@ -2126,7 +2160,8 @@
     endBoss();
     addKippen(reward);
     setStatus(`★ ${b.name} besiegt! +${fmt(reward)} Kippen ★`, 4000);
-    if (bossWins <= BOSSES.length) startCutscene('boss' + (bossWins - 1));
+    const beaten = 'boss' + ((bossWins - 1) % BOSSES.length);
+    if (!seenScenes.includes(beaten)) startCutscene(beaten);
     save();
     renderHud();
     return true;
@@ -2745,7 +2780,7 @@
   //   berg:     wenn der Kippenberg BERG_AT Stummel hat; Besteigung, Gipfel, dahinter die wirklich großen Berge
   //   ssj1:     erste Super-Saiyajin-Stufe; Beben, Schrei, Blitz, die Haare schießen hoch
   //   ssj100:   Stufe 100; die Kamera fährt die endlosen Haare hinauf bis zum Mond
-  //   boss0..3: erster Sieg über den jeweiligen Boss (boss = Index in BOSSES); jeder geht auf seine Art ab
+  //   boss0..5: erster Sieg über den jeweiligen Boss (boss = Index in BOSSES); jeder geht auf seine Art ab
   //   helmut:   nach dem ersten Besuch von Helmut Schmidt; Plenarsaal, das Rauchverbot fällt, Finale in Schwarz-Rot-Gold
   //   obst, eins: beim Kauf der Story mit Index story (E-Zigaretten-Story bzw. letzte Story)
   //   rally:    geheim, per Tastenfolge (SECRET); ein gelbes Afri-Rallyauto rast vorbei Richtung Kapstadt
@@ -2808,10 +2843,12 @@
       ['*klimper* Die ganze Beute fällt ihm aus der Jacke.', '„Behaltet sie! Die waren eh Menthol!“'],
       ['Arno hat verloren. Arno ist das egal.', '„Aufstehen? Für eine Niederlage? Nee.“'],
       ['*blubb* ... *blubb* ... *BLUBB*', '„Bruder ... die Kohle war zu heiß.“'],
-      ['Akku: 3 % ... 2 % ... 1 % ...', '„Hat hier jemand ein USB-C-Kabel?“']
+      ['Akku: 3 % ... 2 % ... 1 % ...', '„Hat hier jemand ein USB-C-Kabel?“'],
+      ['Ein Raumschiff landet. Der Dino steigt ein.', '„Ich fliege heim. Nach Kippen Planet.“'],
+      ['Dem Einhorn wird schlecht. Es kotzt Kippen. In allen Farben.', '„Mir ist gar nicht gut ... *KOTZ*“']
     ].map(([exit, say], i) => ({
       id: 'boss' + i, name: 'Sieg über ' + BOSSES[i].name, end: 132, boss: i,
-      have: () => bossWins > i,
+      have: () => i < 4 && bossWins > i,
       captions: [[4, 20, BOSSES[i].name + ' wankt ...'], [28, 58, exit], [62, 112, say, BOSSES[i].color]]
     })),
     {
@@ -3145,7 +3182,7 @@
         if (t < 50) drawBoss(flick * (t > 38 ? 2 : 1), 0, b.color);
         else if (t < 52) for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) { ch[y][x] = '#'; cl[y][x] = '#ffffff'; }
         else put(38, 23, flick ? '(@@)' : '(**)', EMBER);
-      } else {
+      } else if (k === 3) {
         // E-Zigaretten Raucher: der Akku läuft leer, dann geht er aus wie ein alter Fernseher
         if (t < 60) {
           const bars = lerp(5, 0, 26, 56);
@@ -3159,6 +3196,27 @@
           const ww = lerp(w, 1, 70, 76);
           put(40 - (ww >> 1), mid, '-'.repeat(ww), '#ffffff');
         } else if (t < 84) put(40, mid, '.', '#ffffff');
+      } else if (k === 4) {
+        // Kippen Dino: ein Raumschiff landet, er steigt ein und fliegt heim nach Kippen Planet
+        const ROCKET = ['    /\\', '   /  \\', '  | () |', '  |    |', ' /| KP |\\', '/_|____|_\\', '   /__\\'];
+        if (t < 72) {
+          const ry = t < 50 ? lerp(-8, 17, 26, 40) : Math.round(17 - (t - 50) * (t - 50) * 0.09);
+          if (t < 48) drawBoss(lerp(0, 60 - x0 - (w >> 1), 40, 48), 0, b.color);
+          ROCKET.forEach((l, i) => put(55, ry + i, l, METAL));
+        } else {
+          // Weltraum: Sterne, der Planet aus Stummeln, das kleine Raumschiff fliegt darauf zu
+          for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) { ch[y][x] = ' '; cl[y][x] = ''; }
+          for (let i = 0; i < 40; i++) put((i * 37 + 11) % CW, (i * 53 + 7) % CH, (i + (t >> 2)) % 3 ? '.' : '+', '#8fa3b5');
+          ['       .-=#=~=-.', '     .=#=~=-=#=~=.', '  ===~=-=#=~=-=#=~===', "     '=-=#=~=-=#='", "       '-=#=~=-'"]
+            .forEach((l, i) => put(50, 5 + i, l, i === 2 ? '#cfc6b0' : '#c98f4e'));
+          put(53, 11, 'KIPPEN PLANET', HOT);
+          const rx = lerp(6, 46, 72, 112), ry = lerp(25, 9, 72, 112);
+          put(rx, ry, '/>', METAL); put(rx - 2, ry + 1, flick ? '*~' : '~*', EMBER);
+        }
+      } else if (k === 5) {
+        // Kippen Einhorn: ihm wird schlecht, es kotzt Kippen in Regenbogenfarben (Partikel) und trabt beschämt davon
+        drawBoss(t < 76 ? flick : -Math.round((t - 76) * 1.4), 0, b.color);
+        if (t >= 30 && t < 72 && flick) put(x0 + 4, y0 - 2, '*würg*', '#9aa390');
       }
       if (t >= 96) banner([[3, 'B O S S   B E S I E G T', HOT], [5, b.name, b.color]]);
     } else if (scene.id === 'ssj1' || scene.id === 'ssj100') {
@@ -3685,6 +3743,20 @@
       // E-Zigaretten Raucher: die Dampfwolken werden mit dem Akku dünner
       if (k === 3 && t >= 26 && t < 56 && Math.random() < (56 - t) / 30)
         sm.push({ x: 40 + rnd(-12, 12), y: 9, vx: rnd(-0.2, 0.2), vy: rnd(-0.4, -0.2), life: 18, max: 18, cs: '()o.', color: col });
+      // Kippen Dino: Feuerstrahl unter dem startenden Raumschiff
+      if (k === 4 && t >= 48 && t < 70)
+        for (let i = 0; i < 6; i++) {
+          const life = Math.round(rnd(6, 16));
+          sm.push({ x: 60 + rnd(-2, 2), y: Math.max(0, 24 - (t - 50) * (t - 50) * 0.09), vx: rnd(-0.4, 0.4), vy: rnd(0.2, 0.9), life, max: life, cs: "^*'.",
+            color: Math.random() < 0.5 ? HOT : EMBER });
+        }
+      // Kippen Einhorn: ein Schwall Kippen in Regenbogenfarben, der am Boden liegen bleibt
+      if (k === 5 && t >= 30 && t < 72) {
+        const art = BOSSES[5].art, w = Math.max(...art.map(l => l.length));
+        for (let i = 0; i < 8; i++)
+          sm.push({ x: 40 - (w >> 1) + w, y: 24 - art.length + 3, vx: rnd(0.5, 2.2), vy: rnd(-1.1, 0), g: 0.12, life: 90, max: 90, cs: '=',
+            color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
+      }
     }
     // was fällt (g), bleibt auf dem Boden der Boss-Szenen (Zeile 23) liegen
     for (const p of sm) if (p.g && p.y >= 23) { p.y = 23; p.vx = p.vy = p.g = 0; p.still = true; }
@@ -3767,6 +3839,46 @@
   }
   renderScenes();
 
+  // ---- Kleine Einlagen ------------------------------------------------------
+  // Alle 30 bis 70 Sekunden macht die Figur kurz etwas, rein zum Spaß (kein Einfluss auf Kippen).
+  // ticks = Dauer, say = Statuszeile, need = optionale Bedingung. Das Gesicht dazu steht in face().
+  const GAG_GAP = [330, 780];    // Pause zwischen zwei Einlagen in Loop-Ticks
+  const GAGS = [
+    { id: 'wink',    ticks: 26, say: '*schaut dich an* ... *zwinker*' },
+    { id: 'beer',    ticks: 40, say: '*wirft eine leere Flasche* Prost!', need: () => owned.bier > 0 },
+    { id: 'yawn',    ticks: 30, say: '*gääähn*' },
+    { id: 'sneeze',  ticks: 28, say: 'Ha ... ha ... HATSCHI!' },
+    { id: 'whistle', ticks: 36, say: '*pfeift ein Liedchen*' },
+    { id: 'kiss',    ticks: 24, say: '*wirft dir einen Luftkuss zu*' }
+  ];
+  function gagTick() {
+    if (!gag) {
+      if (loopTick < nextGag || pukeT > 0) return;
+      const pool = GAGS.filter(g => !g.need || g.need());
+      gag = { g: pool[Math.floor(Math.random() * pool.length)], t: 0 };
+      setStatus(gag.g.say, gag.g.ticks * TICK);
+    }
+    const k = gag.t++, id = gag.g.id;
+    if (id === 'wink' && k === 14) spawn(14, BASE + 2, 0.4, -0.3, 8, 'spark', { color: HOT, front: true });
+    if (id === 'beer') {
+      // die Flasche fliegt im Bogen nach rechts und zerspringt am Boden
+      if (k === 8) spawn(15, BASE + 1, 1.6, -1.1, 40, 'glyph', { chars: '|/-\\', rate: 2, color: '#5fd05f', g: 0.1, dragF: 1, front: true });
+      if (k === 35) {
+        for (let i = 0; i < 10; i++) spawn(58, H - 2, rnd(-1.2, 1.2), rnd(-0.9, 0), rnd(6, 14), 'spark', { color: '#5fd05f', front: true });
+        setStatus('*klirr*', 1200);
+      }
+    }
+    if (id === 'sneeze' && k >= 18) {
+      ox = k % 2;
+      if (k === 18) for (let i = 0; i < 12; i++) spawn(CIG_X + 1, MOUTH_ROW, rnd(0.5, 1.8), rnd(-0.5, 0.3), rnd(8, 18), 'spark', { color: '#d8d8d8', front: true });
+    }
+    if (id === 'whistle' && k % 5 === 0)
+      spawn(CIG_X + 1, MOUTH_ROW - 1, 0.45, -0.3, 26, 'glyph', { chars: '♪♫', rate: 6, wob: 0.35, color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)], front: true });
+    if (id === 'kiss' && k === 8)
+      spawn(CIG_X + 1, MOUTH_ROW, 0.5, -0.35, 30, 'glyph', { chars: '♥', rate: 4, wob: 0.3, color: '#ff9ec8', front: true });
+    if (gag.t >= gag.g.ticks) { gag = null; nextGag = loopTick + Math.floor(rnd(GAG_GAP[0], GAG_GAP[1])); }
+  }
+
   const MAX_STEPS = 8;           // schneller als 8x wird nicht animiert, sondern als Ertrag gutgeschrieben
   // Ein Spieltick. render = false: nur rechnen, nichts zeichnen (beim Nachholen verpasster Ticks)
   function gameTick(render) {
@@ -3785,6 +3897,7 @@
       acc += vis;
       while (acc >= 1) { step(); acc--; }
     }
+    gagTick();
     helperSmoke();
     if (brand.fire) {
       // der ganze Boden brennt, dazu Funken überall in der Szene
