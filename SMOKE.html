@@ -74,6 +74,17 @@
   }
   #scene .shiny { cursor: pointer; font-weight: bold; text-shadow: 0 0 6px #fff, 0 0 12px #ffd24a; }
   #scene .drop { cursor: pointer; font-weight: bold; color: #9be05a; text-shadow: 0 0 6px #9be05a, 0 0 12px #3f8f2a; }
+  /* Intro-Cutscene: liegt über der ganzen Seite, blendet am Ende aus */
+  #intro {
+    position: fixed; inset: 0; z-index: 50; background: #000; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: opacity 0.6s;
+  }
+  #intro[hidden] { display: none; }
+  #intro.out { opacity: 0; pointer-events: none; }
+  #intro.light { background: #fff6d0; transition: background 1.6s, opacity 0.6s; }
+  #introscene { font-size: min(1.9vw, 2.6vh); }
+  #introskip { margin-top: 1.2em; color: #555; font-size: 0.75rem; }
   .side { display: flex; flex-direction: column; align-items: center; gap: 12px; }
   #pack {
     background: none;
@@ -134,6 +145,7 @@
   #bossinfo { margin-top: 8px; font-size: 0.8rem; white-space: pre; text-align: center; color: var(--fg); }
   @keyframes bossbob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
   #storylist { margin-top: 12px; }
+  #scenelist { margin-top: 12px; }
   #storytext {
     max-width: 640px; margin: 4px auto 0; padding: 12px 16px;
     border: 1px solid #ffd24a; background: #10130f; font-size: 0.9rem; line-height: 1.6;
@@ -184,9 +196,15 @@
     <button id="storybuy" type="button"></button>
     <div id="storylist" class="picker"></div>
     <div id="storytext" hidden></div>
+    <div id="scenelist" class="picker" role="group" aria-label="Cutscenes"></div>
   </section>
 
   <button id="reset" type="button">Fortschritt zurücksetzen</button>
+
+  <div id="intro" hidden>
+    <pre id="introscene" aria-hidden="true"></pre>
+    <div id="introskip">[ Klick · Leertaste · Esc: überspringen ]</div>
+  </div>
 
 <script>
 (() => {
@@ -258,18 +276,18 @@
     },
     // ---- freischaltbare Sorten (need = insgesamt gerauchte Kippen) ----------
     {
-      id: 'herz', name: 'Herzblatt', need: 50,
+      id: 'herz', name: 'Eve', need: 50,
       frame: '#ff7eb6', accent: '#ffe0ee',
-      art: ['<3  <3  <3', 'HERZBLATT', 'rosa Rauch', 'mit Liebe'],
+      art: ['<3  <3  <3', 'E V E', 'rosa Rauch', 'mit Liebe'],
       len: 6, filter: '[#]', filterColor: '#ff7eb6', paper: '#fff0f6',
       smoke: ['#ff9ec8', '#d86a9a', '#7a3d5a'],
       exhale: 'hearts', drag: 8, rest: 11, lighter: 'zippo', hat: null,
       say: { drag: '*zieht verliebt*', exhale: '*haaach* <3', idle: 'Eine fürs Herz?' }
     },
     {
-      id: 'stern', name: 'Sternenstaub', need: 500,
+      id: 'stern', name: 'Chesterfield', need: 500,
       frame: '#ffd24a', accent: '#fff6c8',
-      art: ['*  .  *  .  *', 'STERNENSTAUB', '. * . * .', 'funkelt'],
+      art: ['*  .  *  .  *', 'CHESTERFIELD', '. * . * .', 'funkelt'],
       len: 6, filter: '[#]', filterColor: '#ffd24a', paper: '#fffbe8',
       smoke: ['#fff6c8', '#c9b25a', '#6e6240'],
       exhale: 'stars', drag: 8, rest: 11, lighter: 'zippo',
@@ -277,81 +295,81 @@
       say: { drag: '*zieht*', exhale: '*funkel* *glitzer*', idle: 'Einmal Sternenhimmel?' }
     },
     {
-      id: 'regen', name: 'Regenbogen', need: 5000,
+      id: 'regen', name: 'Sobranie Cocktail', need: 5000,
       frame: '#9ad0ff', accent: '#ffffff',
-      art: ['.-~~~~~-.', 'REGENBOGEN', 'alle Farben', 'einhornfrei'],
+      art: ['.-~~~~~-.', 'SOBRANIE', 'Cocktail', 'alle Farben'],
       len: 7, filter: '[=]', filterColor: '#ff7eb6', paper: '#ffffff',
       smoke: ['#ffffff', '#b8c8d8', '#667788'],
       exhale: 'rainbow', drag: 9, rest: 11, lighter: 'zippo', hat: null,
       say: { drag: '*zieht bunt*', exhale: '*fwuuuuusch*', idle: 'Bunt gefällig?' }
     },
     {
-      id: 'sarg', name: 'Sargnagel', need: 50000,
+      id: 'sarg', name: 'Roth-Händle', need: 50000,
       frame: '#9a9a9a', accent: '#e8e8e8',
-      art: ['.-.', '(x x)', 'SARGNAGEL', 'extra stark'],
+      art: ['.-.', '(x x)', 'ROTH-HÄNDLE', 'ohne Filter'],
       len: 5, filter: '', filterColor: '', paper: '#d8d8d0',
       smoke: ['#d0d0d0', '#808080', '#404040'],
       exhale: 'skulls', drag: 7, rest: 9, lighter: 'match', hat: null,
       say: { drag: '*zieht finster*', exhale: '*röchel*', idle: 'Die letzte? Niemals.' }
     },
     {
-      id: 'donner', name: 'Donnerkeil', need: 1000000,
+      id: 'donner', name: 'Lucky Strike', need: 1000000,
       frame: '#7f8fb5', accent: '#ffd24a',
-      art: ['(  ~~~~  )', '/ / /', 'DONNERKEIL', 'Starkstrom'],
+      art: ['(  ~~~~  )', '/ / /', 'LUCKY STRIKE', 'Starkstrom'],
       len: 7, filter: '[#]', filterColor: '#ffd24a', paper: '#dfe6f5',
       smoke: ['#aab4cc', '#6a7490', '#3a4058'],
       exhale: 'storm', exDur: 14, drag: 9, rest: 11, lighter: 'zippo', hat: null,
       say: { drag: '*zieht geladen*', exhale: '*KRACH* *grummel*', idle: 'Lust auf ein Gewitter?' }
     },
     {
-      id: 'nova', name: 'Supernova', need: 10000000,
+      id: 'nova', name: 'Peter Stuyvesant', need: 10000000,
       frame: '#b48cff', accent: '#e8dcff',
-      art: ['.  * .  @ .', 'SUPERNOVA', '. @ .  *  .', 'Lichtjahre'],
+      art: ['.  * .  @ .', 'STUYVESANT', '. @ .  *  .', 'weite Welt'],
       len: 7, filter: '[#]', filterColor: '#b48cff', paper: '#f0eaff',
       smoke: ['#e8dcff', '#b48cff', '#5a4a9a'],
       exhale: 'galaxy', exDur: 20, drag: 10, rest: 12, lighter: 'zippo', hat: null,
       say: { drag: '*zieht kosmisch*', exhale: '*wuuuooom*', idle: 'Einmal Milchstraße?' }
     },
     {
-      id: 'seife', name: 'Seifenblase', need: 2000,
+      id: 'seife', name: 'R1', need: 2000,
       frame: '#9ad0ff', accent: '#ffffff',
-      art: ['o  O  o', 'SEIFENBLASE', '( )  o  O', 'blubb'],
+      art: ['o  O  o', 'R 1', '( )  o  O', 'ultra leicht'],
       len: 6, filter: '[=]', filterColor: '#9ad0ff', paper: '#f4fbff',
       smoke: ['#e8f6ff', '#9ac0d8', '#566a78'],
       exhale: 'bubbles', exDur: 12, drag: 8, rest: 11, lighter: 'zippo', hat: null,
       say: { drag: '*zieht*', exhale: '*blubb* *plopp*', idle: 'Eine Runde Seifenblasen?' }
     },
     {
-      id: 'jazz', name: 'Blue Note', need: 20000,
+      id: 'jazz', name: 'Gitanes', need: 20000,
       frame: '#c9a36b', accent: '#fff6c8',
-      art: ['♪  ♫  ♪', 'BLUE NOTE', 'smooth jazz', '~ cool ~'],
+      art: ['♪  ♫  ♪', 'GITANES', 'smooth jazz', '~ cool ~'],
       len: 7, filter: '[#]', filterColor: '#c9a36b', paper: '#f1ead8',
       smoke: ['#e8dcc0', '#a89878', '#5e5642'],
       exhale: 'notes', exDur: 12, drag: 9, rest: 12, lighter: 'zippo', hat: null, shades: true,
       say: { drag: '*zieht im Takt*', exhale: '*dubi dubi duu*', idle: 'Etwas Jazz?' }
     },
     {
-      id: 'silvester', name: 'Silvester', need: 200000,
+      id: 'silvester', name: 'HB', need: 200000,
       frame: '#e0483a', accent: '#ffd24a',
-      art: ['*  \\|/  *', 'SILVESTER', '-- * --', 'Knallfrosch'],
+      art: ['*  \\|/  *', 'H B', '-- * --', 'in die Luft!'],
       len: 6, filter: '[#]', filterColor: '#e0483a', paper: '#f1ead8',
       smoke: ['#f0e0d0', '#a89080', '#5a4a44'],
       exhale: 'fireworks', exDur: 12, drag: 8, rest: 10, lighter: 'match', hat: null,
       say: { drag: '*zieht*', exhale: '*pfiuuu* ... *BUMM*', idle: 'Prost Neujahr!' }
     },
     {
-      id: 'geist', name: 'Geisterstunde', need: 2500000,
+      id: 'geist', name: 'Black Devil', need: 2500000,
       frame: '#c8d0e8', accent: '#ffffff',
-      art: ['.-.', '(o o)', 'GEISTERSTUNDE', 'buh!'],
+      art: ['.-.', '(o o)', 'BLACK DEVIL', 'buh!'],
       len: 6, filter: '[=]', filterColor: '#c8d0e8', paper: '#f0f2ff',
       smoke: ['#e8ecff', '#9aa0c0', '#50546a'],
       exhale: 'ghosts', exDur: 12, drag: 9, rest: 11, lighter: 'match', hat: null,
       say: { drag: '*zieht schaurig*', exhale: '*huuuuuh*', idle: 'Glaubst du an Geister?' }
     },
     {
-      id: 'matrix', name: 'Matrix', need: 25000000,
+      id: 'matrix', name: 'JPS', need: 25000000,
       frame: '#3fdf5f', accent: '#d8ffd8',
-      art: ['1 0 1 1 0 1', 'M A T R I X', '0 1 0 0 1 0', 'rote Pille'],
+      art: ['1 0 1 1 0 1', 'J P S', '0 1 0 0 1 0', 'rote Pille'],
       len: 7, filter: '[#]', filterColor: '#3fdf5f', paper: '#e8ffe8',
       smoke: ['#d8ffd8', '#3fdf5f', '#1f6f2f'],
       exhale: 'matrix', exDur: 14, drag: 10, rest: 11, lighter: 'zippo', hat: null, shades: true,
@@ -595,7 +613,10 @@
 
   // Fortschritt im Browser merken (funktioniert auch ohne Speicher)
   const STORE = 'ascii-raucherpause';
+  let firstStart = false;      // noch kein Spielstand vorhanden: Intro-Cutscene zeigen
+  let seenScenes = [];         // IDs der schon gesehenen Cutscenes (zum erneuten Anschauen)
   try {
+    firstStart = localStorage.getItem(STORE) === null;
     const s = JSON.parse(localStorage.getItem(STORE) || '{}');
     if (typeof s.smoked === 'number' && s.smoked >= 0) smoked = s.smoked;
     bank = (typeof s.bank === 'number' && s.bank >= 0) ? s.bank : smoked;
@@ -607,9 +628,10 @@
     if (Number.isInteger(s.stories) && s.stories > 0) stories = Math.min(STORY_MAX, s.stories);
     if (Number.isInteger(s.bossWins) && s.bossWins > 0) bossWins = s.bossWins;
     if (Number.isInteger(s.saiyan) && s.saiyan > 0) saiyan = s.saiyan;
+    if (Array.isArray(s.scenes)) seenScenes = s.scenes.filter(id => typeof id === 'string');
   } catch (e) {}
   const save = () => {
-    try { localStorage.setItem(STORE, JSON.stringify({ smoked, bank, owned, char: char.id, prestige, stories, bossWins, saiyan })); } catch (e) {}
+    try { localStorage.setItem(STORE, JSON.stringify({ smoked, bank, owned, char: char.id, prestige, stories, bossWins, saiyan, scenes: seenScenes })); } catch (e) {}
   };
 
   let phase = 'idle', t = 0, cigLen = 0, tick = 0, ox = 0;
@@ -640,6 +662,7 @@
       char = un;
       setStatus(`★ Freigespielt: ${un.name}! ★`, 3000);
       renderChars(); save();
+      if (un.id === 'jakob') startCutscene('jakob');
     }
     if (prev < BUFF_NEED && smoked >= BUFF_NEED)
       setStatus('★ Passiver Buff freigeschaltet: Bürgergeld! Merz schaut jetzt vorbei. ★', 4000);
@@ -864,8 +887,11 @@
     return i;
   }
 
+  // Ab so vielen Stummeln (10 Mrd. gerauchte Kippen) wird der Berg bestiegen: Cutscene "berg"
+  const BERG_AT = 397;
   function addPileCell(i) {
     pile[i]++; pileCount++; pileDirty = true;
+    if (pileCount === BERG_AT && loopTick > 0) startCutscene('berg');
   }
 
   function syncPile() {
@@ -876,7 +902,7 @@
   function resetPile() { pile.fill(0); pileCount = 0; pileDirty = true; shiny = null; }
 
   // Shiny-Kippe: glitzert ab und zu ~20 s lang oben auf dem Berg; anklicken gibt 500 Kippen
-  const SHINY_BONUS = 500, SHINY_TICKS = 220, SHINY_COLORS = ['#ffffff', '#ffd24a', '#9ad0ff', '#ff9ec8'];
+  const SHINY_BONUS = 500, SHINY_PILE_EXP = 1.5, SHINY_SAIYAN_EXP = 2, SHINY_TICKS = 220, SHINY_COLORS = ['#ffffff', '#ffd24a', '#9ad0ff', '#ff9ec8'];
   let shiny = null, nextShiny = 330;   // in Loop-Ticks (erste nach ~30 s)
   const shinyPos = () => ({ x: PILE_X0 + shiny.col, y: H - 1 - shiny.k });
 
@@ -924,8 +950,10 @@
     const { x, y } = shinyPos();
     for (let i = 0; i < 14; i++) spawn(x, y, rnd(-1.2, 1.2), rnd(-0.9, 0.1), rnd(8, 16), 'spark');
     endShiny();
-    // 500 Kippen je Stummel im Berg, jedes Prestige verdoppelt, jede Saiyajin-Stufe gibt +100 %
-    const bonus = SHINY_BONUS * Math.max(1, pileCount) * Math.pow(2, prestige) * (1 + saiyan);
+    // 500 Kippen x (Stummel im Berg)^1,5 x (1 + Saiyajin-Stufe)^2, jedes Prestige verdoppelt.
+    // Berg und Saiyajin-Stufen wirken also überproportional: doppelter Berg = 2,8-fach, Stufe 9 = 100-fach.
+    const bonus = Math.round(SHINY_BONUS * Math.pow(Math.max(1, pileCount), SHINY_PILE_EXP) * Math.pow(2, prestige)
+      * Math.pow(1 + saiyan, SHINY_SAIYAN_EXP));
     addKippen(bonus);
     setStatus(`★ Shiny-Kippe! +${fmt(bonus)} Kippen ★`, 2500);
     save();
@@ -1476,6 +1504,7 @@
   document.getElementById('reset').addEventListener('click', () => {
     if (!confirm('Wirklich den ganzen Fortschritt löschen?')) return;
     smoked = 0; bank = 0; prestige = 0; stories = 0; bossWins = 0; saiyan = 0;
+    seenScenes = [];
     renderHair();
     if (boss) endBoss();
     renderStories(); showStory(-1);
@@ -1487,6 +1516,7 @@
     save();
     setStatus('Fortschritt zurückgesetzt.', 2000);
     renderBrands(); renderPack(); draw();
+    startCutscene('intro');      // neuer Anfang, also auch wieder das Intro
   });
 
   renderBrands();
@@ -1653,6 +1683,8 @@
       : `Neue Kippen-Story: ${STORIES[stories - 1].t}`, 4000);
     showStory(stories - 1);
     renderHud(); draw();
+    const sc = CUTSCENES.find(c => c.story === stories - 1);
+    if (sc) startCutscene(sc.id);
   });
   renderStories();
 
@@ -1700,6 +1732,8 @@
     save();
     setStatus(`*KAAAAAH!* SUPER-SAIYAJIN Stufe ${saiyan}!`, 4000);
     renderHair(); renderHud(); draw();
+    if (saiyan === 1) startCutscene('ssj1');
+    if (saiyan === 100) startCutscene('ssj100');
   });
   renderHair();
 
@@ -1714,6 +1748,7 @@
     save();
     setStatus(`★ PRESTIGE ${prestige}! Ein neuer Zigaretten-Stern. ★`, 4000);
     renderHud(); draw();
+    startCutscene('prestige');
   });
 
   function renderHud() {
@@ -1890,6 +1925,7 @@
     endBoss();
     addKippen(reward);
     setStatus(`★ ${b.name} besiegt! +${fmt(reward)} Kippen ★`, 4000);
+    if (bossWins <= BOSSES.length) startCutscene('boss' + (bossWins - 1));
     save();
     renderHud();
     return true;
@@ -1907,6 +1943,7 @@
     if (!boss.gift && damageBoss(income() * dt)) return;
     if (now >= boss.end) {
       if (boss.gift) save();
+      if (boss.gift && !seenScenes.includes('helmut')) startCutscene('helmut');
       setStatus(boss.gift ? `${boss.b.name} zieht weiter. Insgesamt +${fmt(boss.earned)} Kippen.` :`${boss.b.name} ist entkommen! Kein Bonus, dein Einkommen läuft normal weiter.`, 3500);
       endBoss();
       return;
@@ -2044,8 +2081,994 @@
     if (triple) setStatus(`${a === '7' ? 'JACKPOT' : 'Drilling'} ${reels.join('')}! +${fmt(win)} Kippen`, 2500);
   }
 
+  // ---- Cutscenes ----------------------------------------------------------
+  // Ich-Perspektive: Schachtel aufklappen, Zigarette herausziehen, anzünden.
+  // Eigenes Raster über der ganzen Seite; t zählt die Ticks seit Beginn.
+  //   intro:    beim allerersten Spielstart, endet in einer Rauchwolke
+  //   prestige: bei jedem Prestige; die letzte Kippe der Schachtel funkelt, beim Anzünden wird alles Licht
+  //   jakob:    wenn JakobFuckingJones freigespielt wird; Lagertür, endloses Lager, Spiegelpackung
+  //   berg:     wenn der Kippenberg BERG_AT Stummel hat; Besteigung, Gipfel, dahinter die wirklich großen Berge
+  //   ssj1:     erste Super-Saiyajin-Stufe; Beben, Schrei, Blitz, die Haare schießen hoch
+  //   ssj100:   Stufe 100; die Kamera fährt die endlosen Haare hinauf bis zum Mond
+  //   boss0..3: erster Sieg über den jeweiligen Boss (boss = Index in BOSSES); jeder geht auf seine Art ab
+  //   helmut:   nach dem ersten Besuch von Helmut Schmidt; Plenarsaal, das Rauchverbot fällt, Finale in Schwarz-Rot-Gold
+  //   obst, eins: beim Kauf der Story mit Index story (E-Zigaretten-Story bzw. letzte Story)
+  //   rally:    geheim, per Tastenfolge (SECRET); ein gelbes Afri-Rallyauto rast vorbei Richtung Kapstadt
+  // always: gilt ohne Eintrag im Spielstand als gesehen (das Intro hat jeder hinter sich)
+  // lightAt: ab diesem Tick blendet der Hintergrund ins Helle (#intro.light)
+  // have:   gilt als gesehen, sobald die Bedingung erfüllt ist (für Spielstände von vor der Cutscene)
+  // captions: [von Tick, bis Tick, Text, Farbe (optional; 'char' = Farbe des aktuellen Charakters)]
+  const CW = 80, CH = 30, SKIN = '#e0b089';
+  const CUTSCENES = [
+    {
+      id: 'intro', name: 'Die erste Kippe', always: true, end: 164,
+      captions: [
+        [6, 26, 'Endlich Pause.'], [28, 38, '*klapp*'], [42, 66, 'Die erste ist immer die beste.'],
+        [88, 99, '*klick* ... *klick* ...'], [100, 114, '*fffft*'], [118, 130, '*zieht*'], [131, 150, '*pffffff*']
+      ]
+    },
+    {
+      id: 'prestige', name: 'Die letzte für heute', end: 160, lightAt: 118,
+      captions: [
+        [6, 26, 'Feierabend.'], [28, 36, '*klapp*'], [37, 66, 'Die letzte für heute.'],
+        [88, 99, '*klick* ... *klick* ...'], [100, 106, '*fffft*']
+      ]
+    },
+    {
+      id: 'jakob', name: 'God of Smoke', end: 162,
+      have: () => smoked >= CHARS.find(c => c.id === 'jakob').need,
+      captions: [
+        [6, 24, '100.000.000 Kippen.'], [26, 44, '*quiiietsch*'], [50, 74, 'Alle Sorten. Bis zum Horizont.'],
+        [104, 154, '„Nun bin ich wirklich JakobFuckingJones, god of smoke.“', '#ff4a3a']
+      ]
+    },
+    {
+      id: 'berg', name: 'Der Gipfel', end: 164,
+      have: () => pileCount >= BERG_AT,
+      captions: [
+        [6, 28, 'Der Kippenberg ruft.'], [30, 56, '*keuch* ... gleich oben ...'], [64, 86, 'Gipfel! Ganz oben!'],
+        [92, 104, '...'], [108, 158, '„Das sind noch lange nicht genug Stummel.“', 'char']
+      ]
+    },
+    {
+      id: 'ssj1', name: 'Die Verwandlung', end: 158,
+      have: () => saiyan >= 1,
+      captions: [
+        [6, 28, 'Eine Billion Kippen. Irgendetwas regt sich.'], [32, 60, '*grrrrrrr* ...'],
+        [62, 98, '*KAAAAAAAAAH!*', HOT], [106, 152, '„Selbst meine Haare rauchen jetzt.“', 'char']
+      ]
+    },
+    {
+      id: 'ssj100', name: 'Stufe 100', end: 204,
+      have: () => saiyan >= 100,
+      captions: [
+        [4, 22, 'Stufe 100.'], [36, 54, 'Vorbei an den Wolken.'], [57, 73, 'Vorbei am Ferienflieger.'],
+        [75, 92, 'Vorbei an der ISS.'], [118, 148, 'Der Mond: „Aua.“'],
+        [152, 180, '„Ich sehe meine eigene Frisur nicht mehr.“', 'char']
+      ]
+    },
+    // Boss-Siege: [Text zum Abgang, letzter Satz des Bosses]
+    ...[
+      ['*klimper* Die ganze Beute fällt ihm aus der Jacke.', '„Behaltet sie! Die waren eh Menthol!“'],
+      ['Arno hat verloren. Arno ist das egal.', '„Aufstehen? Für eine Niederlage? Nee.“'],
+      ['*blubb* ... *blubb* ... *BLUBB*', '„Bruder ... die Kohle war zu heiß.“'],
+      ['Akku: 3 % ... 2 % ... 1 % ...', '„Hat hier jemand ein USB-C-Kabel?“']
+    ].map(([exit, say], i) => ({
+      id: 'boss' + i, name: 'Sieg über ' + BOSSES[i].name, end: 132, boss: i,
+      have: () => bossWins > i,
+      captions: [[4, 20, BOSSES[i].name + ' wankt ...'], [28, 58, exit], [62, 112, say, BOSSES[i].color]]
+    })),
+    {
+      // Helmut Schmidt: läuft, wenn sein erster Besuch endet. Bundestag, Rauchverbot fällt, alles geht in Rauch auf.
+      id: 'helmut', name: 'Der Bundesrauchkanzler', end: 206,
+      captions: [
+        [4, 22, 'Bonn, 1974. Plenarsaal.'], [24, 40, '„Herr Präsident, meine Damen und Herren ...“', HELMUT.color],
+        [44, 78, '„Wer Visionen hat, soll zum Arzt gehen. Ich habe Menthol.“', HELMUT.color],
+        [88, 138, 'Der Adler raucht mit. Das Parlament raucht mit. Bonn raucht mit.'],
+        [144, 198, '„Regieren ist wie Rauchen: Man hört nicht einfach auf.“', HELMUT.color]
+      ]
+    },
+    {
+      // Story "Der E-Zigaretten Raucher": Mango-Eis trifft Doppelapfel, Adrian fegt beide aus dem Bild
+      id: 'obst', name: 'Obstsalat', end: 200, story: STORIES.findIndex(s => s.t === 'Der E-Zigaretten Raucher'),
+      captions: [
+        [6, 24, 'Der E-Zigaretten Raucher: Mango-Eis.', BOSSES[3].color], [26, 48, 'Der Shisharaucher: Doppelapfel.', BOSSES[2].color],
+        [52, 66, 'Adrian sieht beide lange an.'], [68, 90, '„Das ist kein Rauchen.“', '#b4eba0'],
+        [92, 146, '„Das ist Obstsalat mit Akku und Obstsalat mit Schlauch!“', '#b4eba0'],
+        [152, 198, 'Seitdem müssen beide draußen bleiben. Noch weiter draußen als die Raucher.']
+      ]
+    },
+    {
+      // letzte Story "Kippen Bewusstsein": alle sitzen auf dem Berg, ihr Rauch wird eine Kippe, dann wird alles Licht
+      id: 'eins', name: 'Kippen Bewusstsein', end: 198, lightAt: 150, story: STORIES.findIndex(s => s.t === 'Kippen Bewusstsein'),
+      captions: [
+        [4, 26, 'Am Ende saßen alle zusammen auf dem Kippenberg.'], [30, 52, 'Keiner sagte etwas. Der Erfasser zählte den Rauch.'],
+        [60, 104, 'Sieben Rauchfäden. Eine Kippe.'], [112, 148, 'Und für einen Moment waren alle eins mit der Kippe.']
+      ]
+    },
+    {
+      // geheim: Pfeiltasten hoch hoch runter runter links rechts links rechts (siehe SECRET)
+      id: 'rally', name: 'Afri-Rally', end: 126,
+      captions: [
+        [4, 26, 'Irgendwo zwischen hier und Kapstadt.'], [28, 44, '*brrrrrRRRRRRRR*'], [58, 74, '*schnipp*'],
+        [80, 122, 'Nächster Halt: Kapstadt. Nächste Kippe: jetzt.']
+      ]
+    }
+  ];
+  const introEl = document.getElementById('intro');
+  const introSceneEl = document.getElementById('introscene');
+  let cut = null;                // { scene, t, smoke: [], t0 }, solange eine Cutscene läuft
+  let cutQueue = [];             // IDs, die warten, weil gerade schon eine Cutscene läuft
+
+  function cutFrame(scene, t, smoke) {
+    const last = scene.id === 'prestige';   // Variante "letzte Kippe"
+    const ch = Array.from({ length: CH }, () => Array(CW).fill(' '));
+    const cl = Array.from({ length: CH }, () => Array(CW).fill(''));
+    // Leerzeichen am Zeilenanfang sind durchsichtig, alles dahinter deckt (Hände liegen vor der Schachtel)
+    const put = (x, y, s, c = '') => {
+      const from = s.search(/\S/);
+      if (y < 0 || y >= CH || from < 0) return;
+      for (let i = from, to = s.trimEnd().length; i < to; i++) {
+        const xx = x + i;
+        if (xx >= 0 && xx < CW) { ch[y][xx] = s[i]; cl[y][xx] = c; }
+      }
+    };
+    // Wert, der zwischen Tick t0 und t1 von a nach b läuft
+    const lerp = (a, b, t0, t1) => Math.round(a + (b - a) * Math.max(0, Math.min(1, (t - t0) / (t1 - t0))));
+    const flick = t % 2;
+    // zentrierte Schriftzüge [Zeile, Text, Farbe] mit etwas freigeräumtem Platz drumherum.
+    // Sie werden gesammelt und erst nach den Partikeln gezeichnet, damit kein Funke durch die Schrift fliegt.
+    const banners = [];
+    const banner = lines => banners.push(...lines);
+
+    if (scene.id === 'rally') {
+      // Blick vom Straßenrand: Savanne, Horizont in Zeile 14, davor die Piste (Zeile 19 bis 25)
+      const AFRI = '#d9a520', SAND = '#b98a55';
+      ['\\|/', '--*--', '/|\\'].forEach((l, i) => put(22 - (l.length >> 1), 3 + i, l, HOT));
+      put(0, 14, '_'.repeat(CW), '#6b5a3a');
+      ['   .-~~~-.', ' (~~~~~~~~~)', '     \\|/', '      |', '      |'].forEach((l, i) => put(4, 9 + i, l, '#5fd05f'));
+      put(58, 7, '.------------------.', WOOD);
+      put(58, 8, '|  KAPSTADT  --->  |', WOOD);
+      put(58, 9, "'------------------'", WOOD);
+      for (let y = 10; y < 19; y++) put(67, y, '||', WOOD);
+      put(0, 19, '-'.repeat(CW), SAND);
+      put(0, 25, '-'.repeat(CW), SAND);
+      // Mittelstreifen
+      for (let x = 0; x < CW; x++) if ((x + 2) % 10 < 4) { ch[22][x] = '='; cl[22][x] = '#6b5a3a'; }
+
+      // das Auto: rast zwischen Tick 44 und 64 von links nach rechts durchs Bild
+      const cx = -38 + (t - 44) * 6;
+      if (t >= 44 && cx < CW) {
+        for (const y of [19, 21, 23]) put(cx - 14 - (y + t) % 5, y, '=====  ----', '#8a8474');   // Fahrtwind
+        [
+          '              ___________',
+          '        _____/_|____|____\\____   __',
+          "  _.---'  A F R I    [7]      `-'=|",
+          ' |__  .--.   R A L L Y   .--.   __|',
+          flick ? '    `-(@@)--------------(@@)--\'' : '    `-(**)--------------(**)--\''
+        ].forEach((l, i) => put(cx, 19 + i, l, AFRI));
+      }
+      // die Kippe: fliegt ab Tick 55 im Bogen aus dem Fenster und bleibt vorn am Straßenrand liegen
+      if (t >= 55) {
+        const k = Math.min(16, t - 55), bx = Math.round(45 + k * 1.3), by = Math.min(27, Math.round(20 - 1.3 * k + 0.11 * k * k));
+        if (k < 16) put(bx, by, '-\\|/'[t % 4], '#f1ead8');
+        else { put(bx - 3, 27, '[#]=', '#c98f4e'); put(bx + 1, 27, '=', '#f1ead8'); put(bx + 2, 27, '*', flick ? HOT : EMBER); }
+      }
+      if (t >= 98) banner([[4, 'A F R I - R A L L Y', AFRI], [6, 'Vollgas nach Kapstadt', '#d8d8d8']]);
+    } else if (scene.id === 'obst') {
+      const ez = BOSSES[3], sh = BOSSES[2], ad = CHARS.find(c => c.id === 'adrian');
+      if (t < 150) {
+        // --- Raucherecke: links der E-Raucher, rechts der Shisharaucher, in der Mitte Adrian ---
+        const blast = t >= 92, k = Math.max(0, t - 92), fly = Math.round(k * k * 0.08), shake = blast && t < 106 ? flick : 0;
+        put(0, 26, '_'.repeat(CW), '#4a4f45');
+        // Druckwelle von Adrian aus
+        if (blast && t < 122)
+          for (let y = 0; y < 26; y++)
+            for (let x = 0; x < CW; x++)
+              if (Math.abs(Math.hypot(x - 40, (y - 21) * 2) - k * 3) < 1.5) { ch[y][x] = x < 40 ? '(' : ')'; cl[y][x] = HOT; }
+        if (blast && t < 132 && t % 4 < 2) {
+          const seed = t >> 2;
+          let x = 6 + (seed * 37) % 68;
+          for (let y = 2; y < 14; y++) { const d = (seed * 7 + y * 13) % 3 - 1; x += d; put(x, y, d < 0 ? '/' : d > 0 ? '\\' : '|', '#ffffff'); }
+        }
+        // beide fliegen nach außen aus dem Bild
+        ez.art.forEach((l, i) => put(-fly + (blast ? flick : 0), 12 + i, l, ez.color));
+        sh.art.forEach((l, i) => put(54 + fly + (blast ? flick : 0), 16 + i, l, sh.color));
+        const talking = (t >= 68 && t < 90) || (t >= 92 && t < 126);
+        ad.rows.map(r => r.replace('{E}', t < 50 ? ad.eye : blast ? 'O' : '-').replace('{M}', talking && flick ? '--O' : '---'))
+          .forEach((l, i) => put(31 + shake, 17 + i, l, ad.color));
+        if (t >= 112) banner([[4, 'O B S T S A L A T', HOT], [6, 'mit Akku. Und mit Schlauch.', '#d8d8d8']]);
+      } else {
+        // --- draußen: Kneipe, Raucher, und ganz weit weg im Regen die beiden ---
+        put(0, 22, '_'.repeat(CW), '#4a4f45');
+        put(2, 13, '.---------.', WOOD);
+        put(2, 14, '| KNEIPE  |', WOOD);
+        for (let y = 15; y < 22; y++) put(2, y, '|         |', WOOD);
+        put(10, 18, 'o', METAL);
+        put(15, 18, '[ Raucher ]', '#6b7562');
+        put(18, 20, ' o', '#b8c4a6'); put(18, 21, '/|\\=', '#b8c4a6'); put(22, 21, '*', flick ? HOT : EMBER);
+        put(34, 19, 'noch weiter draußen', '#6b7562');
+        put(28, 20, '- - - - - - - - - - - - - - - - ->', '#4a4f45');
+        put(64, 17, '[ Obstsalat ]', HOT);
+        put(67, 20, ' o', ez.color); put(67, 21, '/|\\', ez.color); put(66, 19, flick ? 'o' : '.', ez.color);
+        put(73, 20, ' o', sh.color); put(73, 21, '/|\\', sh.color); put(77, 19, flick ? '.' : 'o', sh.color);
+      }
+    } else if (scene.id === 'eins') {
+      const crew = ['daniel', 'adrian', 'mattia', 'tomas', 'robin', 'mario', 'jakob'].map(id => CHARS.find(c => c.id === id));
+      const fx = i => 19 + i * 6, one = t >= 112, rise = one ? Math.round((t - 112) * 0.7) : 0;
+      // Sterne
+      for (const [x, y] of [[5, 9], [12, 13], [70, 10], [76, 14], [8, 16], [73, 8], [3, 12]]) put(x, y, (x + (t >> 2)) % 2 ? '.' : '+', '#6b7562');
+      // Kippenberg mit flachem Gipfel; ab Tick 120 löst er sich von oben her in Lichtpunkte auf
+      for (let y = 18; y < CH; y++) {
+        const half = 24 + Math.round((y - 18) * 2.3), gone = y < 18 + (t - 120) * 0.5;
+        for (let x = Math.max(0, 40 - half); x <= Math.min(CW - 1, 40 + half); x++) {
+          const [c, col] = pileCell(x, y);
+          if (!gone) { ch[y][x] = c; cl[y][x] = col || '#cfc6b0'; }
+          else if ((x + y + t) % 3 === 0) { ch[y][x] = '.'; cl[y][x] = HOT; }
+        }
+      }
+      // die Sieben sitzen nebeneinander, jede Kippe glüht; am Schluss steigen sie als Licht auf
+      crew.forEach((c, i) => {
+        const y = 16 - rise;
+        if (y >= 7) {
+          put(fx(i), y, ' o', one ? '#ffffff' : c.color);
+          put(fx(i), y + 1, '/|\\', one ? '#ffffff' : c.color);
+          if (!one) put(fx(i) + 3, y, (t + i) % 4 < 2 ? '*' : '.', EMBER);
+        }
+        // Rauchfaden: steigt auf und läuft mit den anderen in der Bildmitte zusammen
+        const len = Math.min(8, Math.floor((t - 30) * 0.4));
+        for (let r = 1; r <= len && !one; r++) {
+          const f = r / 8;
+          put(Math.round(fx(i) + 3 + (40 - fx(i) - 3) * f * f + Math.sin((r + t) * 0.5) * (1 - f)), 15 - r, r < 3 ? '.' : ':', c.color);
+        }
+      });
+      // der Erfasser steht daneben und zählt
+      if (19 - rise >= 7) { put(66, 19 - rise, ' o', one ? '#ffffff' : '#b8c4a6'); put(66, 20 - rise, '/|\\', one ? '#ffffff' : '#b8c4a6'); }
+      if (t >= 34 && t < 126)
+        put(63, 16, 'Rauch: ' + (one ? '1' : Math.floor((t - 34) * (t - 34) * 7).toLocaleString('de-DE')), one ? HOT : '#6b7562');
+      // aus dem Rauch entsteht am Himmel eine einzige riesige Kippe (von der Mitte nach außen)
+      if (t >= 56) {
+        const rows = ['.' + '-'.repeat(58) + '.', '|#######|' + '.'.repeat(49) + '@@', '|#######|' + '.'.repeat(49) + '@@', "'" + '-'.repeat(58) + "'"];
+        rows.forEach((l, j) => {
+          for (let i = 0; i < l.length; i++) {
+            const x = 10 + i;
+            if (Math.abs(x - 40) > (t - 56) * 1.2) continue;
+            ch[3 + j][x] = l[i];
+            cl[3 + j][x] = l[i] === '@' ? ((t + j) % 2 ? HOT : EMBER) : l[i] === '#' ? '#c98f4e' : l[i] === '.' ? '#8a8474' : '#f1ead8';
+          }
+        });
+      }
+      // Strahlen in Regenbogenfarben von der Kippe aus, danach geht alles in Weiß auf (#intro.light)
+      if (t >= 126)
+        for (let y = 0; y < CH; y++)
+          for (let x = 0; x < CW; x++) {
+            const dx = x - 40, dy = (y - 5) * 2, d = Math.hypot(dx, dy);
+            if (t >= 150 && d < (t - 150) * 3.2) { ch[y][x] = '#'; cl[y][x] = '#ffffff'; continue; }
+            if (d > (t - 126) * 3 || ch[y][x] !== ' ') continue;
+            const sec = Math.floor(Math.atan2(dy, dx) * 14 / Math.PI) + 28 + (t >> 1);
+            if (sec % 2 === 0) {
+              ch[y][x] = Math.abs(dx) > Math.abs(dy) ? '-' : Math.abs(dx) * 3 < Math.abs(dy) ? '|' : (dx * dy > 0 ? '\\' : '/');
+              cl[y][x] = RAINBOW[sec % RAINBOW.length];
+            }
+          }
+      if (t >= 166) banner([[9, 'K I P P E N   B E W U S S T S E I N', '#6b4a00'], [11, 'Für einen Moment waren alle eins mit der Kippe.', '#6b4a00']]);
+    } else if (scene.id === 'helmut') {
+      const art = HELMUT.art, EAGLE = '#d8d8d8';
+      const helmut = (x, y, col) => art.forEach((l, i) => put(x, y + i, l, col));
+      // Bundesadler, zwei Flügelstellungen; smoking: mit Kippe im Schnabel
+      const eagle = (x, y, col, frame, smoking) => {
+        (frame ? [
+          '          ___',
+          '  ______( o>)______',
+          ' /////\\\\/|  |\\//\\\\\\\\\\',
+          ' ////  \\ |##| /  \\\\\\\\',
+          '         /||\\',
+          '        ^^  ^^'
+        ] : [
+          ' \\\\\\\\\\   ___   /////',
+          '  \\\\\\\\\\\\( o>)//////',
+          '   \\\\\\\\\\/|  |\\/////',
+          '     \\\\\\ |##| ///',
+          '         /||\\',
+          '        ^^  ^^'
+        ]).forEach((l, i) => put(x, y + i, l, col));
+        if (smoking) { put(x + 13, y + 1, '=====', '#f1ead8'); put(x + 18, y + 1, '*', flick ? HOT : EMBER); }
+      };
+
+      if (t < 80) {
+        // --- Szene 1: Plenarsaal. Rednerpult, Adler an der Wand, ein Verbotsschild ---
+        const cough = t >= 60;
+        put(0, 9, '_'.repeat(CW), '#2e332b');
+        put(0, 28, '_'.repeat(CW), '#4a4f45');
+        eagle(52, 2, EAGLE, 0, false);
+        if (cough) { put(62, 3, 'x', EAGLE); if (flick) put(73, 4, '*hust*', '#9aa390'); }
+        // Schild: "VERBOTEN" fällt Buchstabe für Buchstabe ab, dann steht dort "ERWÜNSCHT"
+        put(3, 3, '.' + '-'.repeat(20) + '.', METAL);
+        put(3, 4, '|' + ' '.repeat(20) + '|', METAL);
+        put(3, 5, '|' + ' '.repeat(20) + '|', METAL);
+        put(3, 6, "'" + '-'.repeat(20) + "'", METAL);
+        put(5, 4, 'R A U C H E N', '#e0483a');
+        [...'VERBOTEN'].forEach((c, i) => {
+          const f = t - 46 - i * 1.5, y = f <= 0 ? 5 : Math.round(5 + f * f * 0.15);
+          if (y < CH) put(6 + i * 2 + (f > 0 ? (i % 3) - 1 : 0), y, c, '#e0483a');
+        });
+        if (t >= 62) put(6, 5, 'E R W Ü N S C H T'.slice(0, (t - 61) * 2), '#5fd05f');
+        // Abgeordnete
+        for (const y of [20, 23, 26]) {
+          put(52 + y % 3, y, Array.from({ length: 6 }, (_, i) => cough && (i + t >> 1) % 2 ? 'O' : 'o').join('   '), '#6b7562');
+          put(50 + y % 3, y + 1, '='.repeat(25), '#4a4f45');
+        }
+        helmut(20, 11, HELMUT.color);
+        put(18, 23, '.' + '-'.repeat(26) + '.', WOOD);
+        put(18, 24, '|      BUNDESKANZLER       |', WOOD);
+        for (let y = 25; y < 28; y++) put(18, y, '|' + ' '.repeat(26) + '|', WOOD);
+      } else if (t < 84) {
+        // Schlag: alles weiß
+        for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) { ch[y][x] = '#'; cl[y][x] = '#ffffff'; }
+      } else if (t < 140) {
+        // --- Szene 2: der Saal geht in Rauch auf, in Schwarz-Rot-Gold; der Adler raucht mit ---
+        const reach = (t - 84) * 5;
+        for (let y = 0; y < CH; y++)
+          for (let x = 0; x < Math.min(CW, reach); x++)
+            if ((x * 7 + y * 11 + t) % 3 && !(x > 25 && x < 55 && y > 0 && y < 25)) {   // Mitte bleibt frei für Adler und Kanzler
+              ch[y][x] = 'oO~()'[(x + y * 3 + t) % 5];
+              cl[y][x] = y < 10 ? '#6a6a6a' : y < 20 ? '#e0483a' : '#ffd24a';
+            }
+        // Blitze
+        if (t % 4 < 2) {
+          const seed = t >> 2;
+          let x = 4 + (seed * 37) % 72;
+          for (let y = 0; y < 12; y++) { const d = (seed * 7 + y * 13) % 3 - 1; x += d; put(x, y, d < 0 ? '/' : d > 0 ? '\\' : '|', '#ffffff'); }
+        }
+        eagle(30, 2, HOT, (t >> 1) % 2, true);
+        helmut(29 + flick, 12, '#ffffff');
+        if (t >= 104) banner([[25, 'B U N D E S R A U C H K A N Z L E R', HOT], [27, '1974 bis 1982 · acht Jahre Dauerfeuer', '#d8d8d8']]);
+      } else {
+        // --- Szene 3: Ruhe. Nur er, im Mentholgrün, und ein dünner Rauchfaden ---
+        helmut(29, 12, '#7fd6c2');
+        put(0, 24, '_'.repeat(CW), '#2e332b');
+        if (t >= 172) banner([[26, 'Helmut Schmidt · Kanzler · Kettenraucher · Legende', '#7fd6c2']]);
+      }
+    } else if (scene.boss !== undefined) {
+      // Boss steht mittig auf dem Boden (Zeile 24). Bis Tick 26 kassiert er Treffer, dann sein Abgang.
+      const k = scene.boss, b = BOSSES[k], art = b.art, h = art.length, w = Math.max(...art.map(l => l.length));
+      const x0 = 40 - (w >> 1), y0 = 24 - h, mid = y0 + (h >> 1);
+      // alles ab Zeile 24 verschwindet im Boden
+      const drawBoss = (dx, dy, col) => art.forEach((l, i) => { if (y0 + dy + i < 24) put(x0 + dx, y0 + dy + i, l, col); });
+      put(0, 24, '_'.repeat(CW), '#4a4f45');
+      if (t < 26) {
+        const hit = t % 6 < 2;
+        drawBoss(hit ? 1 : 0, 0, hit ? '#ffffff' : b.color);
+        if (hit)
+          for (let i = 0; i < 5; i++) {
+            const r = (t / 6 | 0) * 31 + i * 17;
+            put(x0 - 4 + r % (w + 8), y0 - 2 + (r * 7) % (h + 2), '*', HOT);
+          }
+        if (t >= 20) banner([[5, 'K . O .', HOT]]);
+      } else if (k === 0) {
+        // KippenDieb: die Beute fällt heraus (Partikel), dann rennt er nach rechts davon
+        const run = Math.max(0, t - 44), dx = Math.round(run * run * 0.12);
+        drawBoss(dx + (run ? 0 : flick), 0, b.color);
+        if (run && x0 + dx < CW) put(x0 + dx - 7, 23, flick ? '. o .' : 'o . o', '#6b7562');
+      } else if (k === 1) {
+        // ArnoDübel: schläft ein und versinkt samt Sofa im Boden
+        drawBoss(0, lerp(0, h, 50, 92), b.color);
+      } else if (k === 2) {
+        // Shisharaucher: die Pfeife kocht über, es knallt, übrig bleibt die glühende Kohle
+        if (t < 50) drawBoss(flick * (t > 38 ? 2 : 1), 0, b.color);
+        else if (t < 52) for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) { ch[y][x] = '#'; cl[y][x] = '#ffffff'; }
+        else put(38, 23, flick ? '(@@)' : '(**)', EMBER);
+      } else {
+        // E-Zigaretten Raucher: der Akku läuft leer, dann geht er aus wie ein alter Fernseher
+        if (t < 60) {
+          const bars = lerp(5, 0, 26, 56);
+          drawBoss(0, 0, b.color);
+          put(x0 + w + 2, y0 + 3, 'AKKU', '#d8d8d8');
+          put(x0 + w + 2, y0 + 4, '[' + '#'.repeat(bars) + '.'.repeat(5 - bars) + ']', bars > 1 ? '#5fd05f' : '#e0483a');
+        } else if (t < 70) {
+          const vis = lerp(h, 1, 60, 70);
+          for (let j = 0; j < vis; j++) put(x0, mid - (vis >> 1) + j, art[Math.floor(j * h / vis)], b.color);
+        } else if (t < 78) {
+          const ww = lerp(w, 1, 70, 76);
+          put(40 - (ww >> 1), mid, '-'.repeat(ww), '#ffffff');
+        } else if (t < 84) put(40, mid, '.', '#ffffff');
+      }
+      if (t >= 96) banner([[3, 'B O S S   B E S I E G T', HOT], [5, b.name, b.color]]);
+    } else if (scene.id === 'ssj1' || scene.id === 'ssj100') {
+      const HAIR = '#ffe14a', me = char.color || '#b8c4a6', HY = 19, HX = 31;   // Kopf: oberste Zeile, linke Spalte
+      // Kopf des aktuellen Charakters; dy verschiebt ihn nach unten (Kamerafahrt)
+      const head = (eye, mouth, dx = 0, dy = 0) => char.rows
+        .map(r => r.replace('{E}', eye).replace('{M}', mouth)).forEach((l, i) => put(HX + dx, HY + dy + i, l, me));
+      // Zackenhaare wie im Spiel: fünf Zacken, h Zeilen hoch, half = halbe Breite am Ansatz.
+      // scroll = so viele Zeilen ist die Kamera schon nach oben gefahren
+      const hair = (h, half0, scroll = 0, dx = 0) => {
+        for (const k of [-2, 2, -1, 1, 0]) {
+          const hh = Math.max(2, Math.round(h * (1 - 0.22 * Math.abs(k)))), tilt = k * Math.min(0.25, 4 / hh);
+          for (let y = 0; y < CH; y++) {
+            const r = HY - 1 + scroll - y;
+            if (r < 0 || r >= hh) continue;
+            const c = 40 + dx + k * 3 + tilt * r, half = half0 * (1 - r / hh);
+            const l = Math.round(c - half), rr = Math.round(c + half);
+            for (let x = Math.max(0, l); x <= Math.min(CW - 1, rr); x++) {
+              ch[y][x] = r === hh - 1 || l === rr ? 'A' : x < c ? '/' : '\\';
+              cl[y][x] = HAIR;
+            }
+          }
+        }
+      };
+      const ground = dy => put(0, HY + 9 + dy, '_'.repeat(CW), '#4a4f45');
+      const title = (a, b) => [[3, a, HOT], [5, b, '#d8d8d8']].forEach(([y, s, c]) => {
+        const x = (CW - s.length) >> 1;
+        for (let i = -2; i < s.length + 2; i++) ch[y][x + i] = ' ';
+        put(x, y, s, c);
+      });
+
+      if (scene.id === 'ssj1') {
+        if (t >= 66 && t < 68) {
+          // Blitz: einen Moment lang ist alles weiß
+          for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) { ch[y][x] = '#'; cl[y][x] = '#ffffff'; }
+        } else {
+          const rumble = t >= 30 && t < 66, on = t >= 68, shake = rumble || (on && t < 100) ? flick : 0;
+          ground(0);
+          if (on) {
+            // Blitze schlagen rund um den Kopf ein
+            if (t < 100 && t % 4 < 2) {
+              const seed = t >> 2;
+              let x = 8 + (seed * 37) % 64;
+              for (let y = 0; y < 16; y++) {
+                const d = (seed * 7 + y * 13) % 3 - 1;
+                x += d;
+                put(x, y, d < 0 ? '/' : d > 0 ? '\\' : '|', '#ffffff');
+              }
+            }
+            hair(lerp(1, 10, 68, 76), 2, 0, shake);
+          }
+          head(rumble ? '-' : on ? 'O' : char.eye, t >= 62 && t < 100 ? '--O' : rumble ? '--=' : '---', shake);
+          if (t >= 80) title('S U P E R - S A I Y A J I N', 'Stufe 1');
+        }
+      } else {
+        // Stufe 100: 170 Zeilen Haare. Tick 24 bis 120 fährt die Kamera hinauf, ab 150 wieder der Kopf.
+        const up = t >= 24 && t < 150, scroll = up ? lerp(0, 160, 24, 120) : 0;
+        const row = r => HY - 1 + scroll - r;           // Bildzeile zu einer Höhe r über dem Kopf
+        // Sterne: je höher, desto mehr
+        for (let y = 0; y < CH; y++) {
+          const r = HY - 1 + scroll - y;
+          if (r < 60) continue;
+          for (let x = 0; x < CW; x++)
+            if ((x * 31 + r * 17) % (r > 110 ? 53 : 97) === 0) { ch[y][x] = (x + r) % 3 ? '.' : '+'; cl[y][x] = '#8fa3b5'; }
+        }
+        if (up) {
+          // was unterwegs vorbeizieht
+          [' .--~~--.', '(        )', " '-~~~~-'"].forEach((l, i) => { put(8, row(46) + i, l, '#d8d8d8'); put(57, row(36) + i, l, '#d8d8d8'); });
+          put(62, row(28), 'v  v', '#6b7562'); put(14, row(24), 'v', '#6b7562');
+          ['     \\\\', '=====[oooo]>', '     //'].forEach((l, i) => put(t * 2 - 110, row(74) + i, l, '#e8e4dc'));
+          put(86 - t, row(100), '[#]=|=o=|=[#]', METAL);
+          // der Mond; die Haarspitze piekst ihn von unten
+          ['    _..._', "  .'     '.", ' /  >   <  \\', '|     o     |', ' \\    ~    /', "  '._____.'"]
+            .forEach((l, i) => put(34, row(175) + i, l, '#d8d8c0'));
+          if (t >= 120 && flick) { put(31, row(170), '*', HOT); put(48, row(171), '*', HOT); }
+        }
+        ground(scroll);
+        hair(170, 3, scroll);
+        head(t >= 150 ? 'O' : char.eye, t >= 152 && t < 173 && flick ? '--o' : '---', 0, scroll);
+        // zum Schluss lädt er sich auf: goldene Strahlen vom Kopf aus über das ganze Bild
+        if (t >= 180) {
+          const R = (t - 180) * 4;
+          for (let y = 0; y < CH; y++)
+            for (let x = 0; x < CW; x++) {
+              const dx = x - 40, dy = (y - 22) * 2, d = Math.hypot(dx, dy);
+              if (d < 12 || d > R || ch[y][x] !== ' ') continue;
+              if ((Math.floor(Math.atan2(dy, dx) * 14 / Math.PI) + 28 + (t >> 1)) % 3 === 0) {
+                ch[y][x] = Math.abs(dx) > Math.abs(dy) ? '-' : Math.abs(dx) * 3 < Math.abs(dy) ? '|' : (dx * dy > 0 ? '\\' : '/');
+                cl[y][x] = HAIR;
+              }
+            }
+          if (t >= 186) title('S U P E R - S A I Y A J I N', 'Stufe 100');
+        }
+      }
+    } else if (scene.id === 'berg') {
+      const STUB = '#cfc6b0', me = char.color || '#b8c4a6';
+      // Stummelhaufen mit Gipfel bei (px, py); slope = Spalten pro Zeile. far: blass (weit weg),
+      // top: nur Zeilen ab dieser zeichnen (darüber liegt noch Nebel)
+      const mount = (px, py, slope, far, top = 0) => {
+        for (let y = Math.max(0, py, top); y < CH; y++) {
+          const half = Math.round((y - py) * slope) + (y * 7 + px) % 3 - 1;
+          for (let x = Math.max(0, px - half); x <= Math.min(CW - 1, px + half); x++) {
+            const [c, col] = pileCell(x + px, y + (far ? 5 : 0));
+            if (!far) { ch[y][x] = c; cl[y][x] = col || STUB; continue; }
+            // ferne Berge: nur locker gefüllt, mit klarer Kante
+            const edge = x === px - half ? '/' : x === px + half ? '\\' : '';
+            ch[y][x] = edge || ((x * 3 + y * 5) % 4 ? ' ' : c);
+            cl[y][x] = edge ? '#8a8474' : '#5c574a';
+          }
+        }
+      };
+      // Männchen mit den Füßen in Zeile y; pose: 'walk', 'cheer' oder 'sad'
+      const climber = (x, y, pose) => {
+        put(x, y - 2, pose === 'cheer' ? '\\o/' : ' o', me);
+        put(x, y - 1, pose === 'cheer' ? ' |' : '/|\\', me);
+        put(x, y, pose === 'walk' && flick ? ' |\\' : '/ \\', me);
+      };
+      // Fahne: eine Zigarette mit Glut
+      const flag = (x, y) => { put(x, y - 2, '*', EMBER); put(x, y - 1, '|', '#f1ead8'); put(x, y, '|', '#c98f4e'); };
+
+      if (t < 62) {
+        // --- Szene 1: Aufstieg über die linke Flanke ---
+        for (const [x, y] of [[6, 3], [18, 8], [63, 4], [71, 11], [55, 1], [10, 14]]) put(x, y, (x + t >> 2) % 2 ? '.' : '+', '#6b7562');
+        mount(40, 6, 2);
+        const y = lerp(28, 6, 4, 56), x = 40 - (y - 6) * 2 - 1;
+        if (t >= 58) flag(43, 5);
+        climber(x, y - 1, t < 56 ? 'walk' : 'cheer');
+        // losgetretene Stummel kullern hinter ihm den Hang hinunter
+        if (t >= 4 && t < 56)
+          for (let i = 1; i <= 2; i++) put(x - 3 * i - t % 3, y - 1 + i, '=', STUB);
+      } else {
+        // --- Szene 2: Totale. Der Nebel hebt sich: dahinter stehen Berge, die oben aus dem Bild ragen ---
+        const fog = lerp(CH, 0, 72, 106);
+        if (t >= 72) {
+          mount(79, -5, 0.7, true, fog);
+          mount(54, -12, 0.85, true, fog);
+          for (let x = 0; x < CW; x++)
+            if (fog > 0 && fog < CH && (x * 5 + t) % 7 < 4) { ch[fog][x] = '~'; cl[fog][x] = '#6b7562'; }
+        }
+        mount(13, 22, 1.5);
+        flag(15, 21);
+        climber(11, 21, t < 94 ? 'cheer' : 'sad');
+        if (t >= 94 && t < 108) put(13, 18, t < 100 ? '?' : '!', HOT);
+        // Großaufnahme: der Kopf spricht, die Augen werden groß
+        if (t >= 108) {
+          const talking = t < 130;
+          char.rows.map(r => r.replace('{E}', 'O').replace('{M}', talking && flick ? '--o' : '---'))
+            .forEach((l, i) => put(56, CH - 9 + i, l, me));
+        }
+        if (t >= 142) {
+          const s = 'Weiterrauchen.';
+          for (let i = -2; i < s.length + 2; i++) ch[3][((CW - s.length) >> 1) + i] = ' ';
+          put((CW - s.length) >> 1, 3, s, HOT);
+        }
+      }
+    } else if (scene.id === 'jakob') {
+      const jk = CHARS.find(c => c.id === 'jakob'), n = BRANDS.length;
+      const finger = [' ,-----------.__', '(  ----         `-.', ' `-----------.     \\'];
+
+      // Blick in den Lagergang (Fluchtpunkt in der Bildmitte), gezeichnet in das Rechteck x0..x1, y0..y1.
+      // Links und rechts Regale voller Schachteln aller Sorten, die mit der Tiefe immer kleiner werden;
+      // die Kamera fährt langsam hinein, deshalb wandern die Schachteln nach außen.
+      const hall = (x0, x1, y0, y1) => {
+        for (let y = Math.max(0, y0); y <= Math.min(CH - 1, y1); y++)
+          for (let x = Math.max(0, x0); x <= Math.min(CW - 1, x1); x++) {
+            const dx = x - 39.5, dy = (y - 12) * 2 + 1, ax = Math.abs(dx), ay = Math.abs(dy);
+            let c = ' ', col = '';
+            if (ax < 5 && ay < 4) {
+              // ganz hinten verliert sich alles im Licht
+              c = (x + y + t) % 3 ? '.' : '*'; col = '#ffffff';
+            } else if (ax / 40 > ay / 30) {
+              // Seitenwand: Regal. z = Tiefe (1 = direkt vor der Nase)
+              const z = 40 / ax, lv = (dy * z + 30) / 10, zz = (z + t * 0.02) * 5;
+              const b = (Math.floor(zz) * 7 + Math.floor(lv) * 3 + (dx < 0 ? 0 : 11)) % n;
+              const bw = 200 / (ax * ax);                 // Breite einer Schachtelkante in Spalten
+              if (z > 9) { c = ':'; col = '#6b7562'; }
+              else if (lv - Math.floor(lv) < 0.18) { c = '='; col = WOOD; }
+              else { c = bw < 0.5 && zz - Math.floor(zz) < bw ? '|' : BRANDS[b].name[0]; col = BRANDS[b].frame; }
+            } else {
+              const z = 30 / ay, X = dx * z;
+              if (dy > 0) {
+                // Boden: Kacheln
+                if ((Math.floor(X / 10 + 100) + Math.floor(z * 3 + t * 0.06)) & 1) { c = '.'; col = '#4a4f45'; }
+              } else if (Math.abs(X) < 6 && (z * 1.5 + t * 0.03) % 1 < 0.3) {
+                // Decke: Leuchtstoffröhren
+                c = '='; col = HOT;
+              }
+            }
+            ch[y][x] = c; cl[y][x] = col;
+          }
+      };
+
+      if (t < 46) {
+        // --- Szene 1: Lagertür, eine Hand drückt sie auf ---
+        // Mauer
+        for (let y = 0; y < CH; y++)
+          for (let x = 0; x < CW; x++)
+            if ((x + (y % 2) * 4) % 8 === 0) { ch[y][x] = '|'; cl[y][x] = '#2e332b'; }
+            else if (y % 2) { ch[y][x] = '_'; cl[y][x] = '#2e332b'; }
+        // Schild links neben der Tür (oben stehen die Untertitel)
+        put(3, 11, '.' + '-'.repeat(15) + '.', METAL);
+        put(3, 12, '|   L A G E R   |', METAL);
+        put(3, 13, "'" + '-'.repeat(15) + "'", METAL);
+        // Rahmen (23 und 56) und Türblatt; w = sichtbare Breite des Türblatts, es schwingt nach links auf
+        const w = lerp(32, 4, 26, 42);
+        put(23, 3, '.' + '='.repeat(32) + '.', METAL);
+        for (let y = 4; y < 28; y++) { put(23, y, '|', METAL); put(56, y, '|', METAL); }
+        put(0, 28, '_'.repeat(CW), '#4a4f45');
+        if (w < 32) {
+          hall(24 + w, 55, 4, 27);
+          for (let y = 4; y < 28; y++) put(24 + w, y, '|', '#ffffff');   // Lichtkante
+        }
+        for (let y = 4; y < 28; y++) {
+          put(24, y, '|' + ' '.repeat(w - 2) + '|', WOOD);
+          for (const f of [0.25, 0.5, 0.75]) put(24 + Math.round(f * w), y, '|', '#7a5a36');
+        }
+        if (w > 6) put(24 + w - 4, 15, 'O=', METAL);
+        // Hand: greift zur Klinke, drückt, zieht sich zurück
+        const hx = 51 + lerp(34, 0, 12, 20) + lerp(0, 40, 30, 38);
+        finger.forEach((l, i) => put(hx, 14 + i, l, SKIN));
+        for (let i = 0; 17 + i < CH; i++) put(hx + 14 + i, 17 + i, '\\      \\', SKIN);
+      } else {
+        // --- Szene 2: das Lager; ab Tick 76 hebt man eine spiegelnde Schachtel vors Gesicht ---
+        hall(0, CW - 1, 0, CH - 1);
+        if (t >= 76) {
+          const px = 25, py = lerp(CH, 5, 76, 88);
+          for (let y = py + 20; y < CH; y++) { put(px + 2, y, '|      |', SKIN); put(px + 20, y, '|      |', SKIN); }
+          put(px, py, '.' + '-'.repeat(28) + '.', METAL);
+          for (let i = 1; i < 20; i++) put(px, py + i, '|' + ' '.repeat(28) + '|', METAL);
+          put(px, py + 20, "'" + '-'.repeat(28) + "'", METAL);
+          // wandernde Lichtreflexe auf dem Chrom
+          for (let i = 1; i < 20; i++)
+            for (let x = 1; x < 29; x++)
+              if ((x + i * 2 + t) % 19 === 0) put(px + x, py + i, '/', '#ffffff');
+          // im Spiegel: Jakob. Erst nur ein Schatten, dann in voller Pracht; beim Sprechen bewegt sich der Mund
+          if (t >= 92) {
+            const shadow = t < 98, talking = t >= 104 && t < 133;
+            const rows = jk.rows.map(r => r.replace('{E}', jk.eye).replace('{M}', talking && flick ? '--o' : '---'));
+            jk.hatFrames[(t / 3 | 0) % jk.hatFrames.length].forEach((l, i) =>
+              put(px + 6, py + 2 + i, l, shadow ? '#5a3a34' : jk.hatColor));
+            rows.forEach((l, i) => put(px + 6, py + 8 + i, l, shadow ? '#5a3a34' : jk.color));
+          }
+          put(px + 1, py + 18, center('~ SPIEGEL-EDITION ~', 28), METAL);
+          // Daumen links und rechts
+          ['.-----.', '|      )', "'-----'"].forEach((l, i) => put(px - 3, py + 14 + i, l, SKIN));
+          ['.-----.', '(      |', "'-----'"].forEach((l, i) => put(px + 25, py + 14 + i, l, SKIN));
+        }
+      }
+    } else if (t < 70) {
+      // --- Szene 1: Schachtel in der linken Hand, rechte Hand zieht eine Zigarette ---
+      const px = 29, cx = px + 8;
+      const py = t < 54 ? lerp(CH + 4, 14, 0, 14) : lerp(14, CH + 6, 54, 61);
+      const lift = t < 28 ? 0 : t < 31 ? 1 : 3;           // wie weit der Deckel offen ist
+      const rise = lerp(0, 10, 40, 54);                   // wie weit die Zigarette herausgezogen ist
+      const cigTop = t < 61 ? 14 - rise : lerp(4, CH + 6, 61, 68);
+      const edge = brand.frame, blank = '|' + ' '.repeat(19) + '|';
+
+      // Unterarm hinter der Schachtel
+      put(px + 2, py + 12, '\\               /', SKIN);
+      for (let y = py + 13; y < CH; y++) put(px + 3, y, '|             |', SKIN);
+
+      // Deckel, darunter (wenn offen) die Filter
+      put(px, py - lift, '.' + '-'.repeat(19) + '.', edge);
+      let y = py - lift + 1;
+      for (let i = 0; i < (lift === 3 ? 2 : 1); i++) put(px, y++, blank, edge);
+      for (; y <= py + 1; y++) {
+        if (last) {
+          // gähnende Leere, nur in der Mitte steckt noch eine
+          put(px, y, blank, edge);
+          if (rise === 0) { put(cx, y, '|#|', brand.paper); put(cx + 1, y, '#', brand.filterColor); }
+          continue;
+        }
+        put(px, y, '|' + ' |'.repeat(10), brand.paper);
+        for (let k = 0; k < 10; k++)
+          if (k !== 4 || rise === 0) put(px + 1 + 2 * k, y, '#', brand.filterColor);
+      }
+
+      // die gezogene Zigarette (Filter oben), unten noch von der Schachtel verdeckt
+      if (rise > 0) {
+        ['.-.', '|#|', '|#|', '| |', '| |', '| |', '| |', '| |', '| |', "'-'"].forEach((l, i) => {
+          const yy = cigTop + i;
+          if (t < 54 && yy >= py + 2) return;
+          put(cx, yy, l, brand.paper);
+          if (l[1] === '#') put(cx + 1, yy, '#', brand.filterColor);
+        });
+      }
+
+      // Vorderseite der Schachtel
+      put(px, py + 2, '|' + '-'.repeat(19) + '|', edge);
+      for (let i = 0; i < 8; i++) {
+        put(px, py + 3 + i, blank, edge);
+        const a = brand.art[i - 1];
+        if (a) put(px + 1, py + 3 + i, center(a, 19), brand.accent);
+      }
+      put(px, py + 11, "'" + '-'.repeat(19) + "'", edge);
+
+      // linke Hand: Daumen vorn links, Fingerkuppen greifen rechts um die Kante
+      ['.-----.', '|      )', "'-----'"].forEach((l, i) => put(px - 3, py + 6 + i, l, SKIN));
+      put(px + 17, py + 4, ' ____', SKIN);
+      for (let i = 0; i < 4; i++) put(px + 17, py + 5 + i, '(____', SKIN);
+
+      // rechte Hand: kommt von rechts, greift die Zigarette am Filter
+      if (t >= 34) {
+        const hx = cx - 1 + lerp(46, 0, 34, 40), hy = cigTop + 2;
+        [' ,-----------.__', '(  ----         `-.', ' `-----------.     \\'].forEach((l, i) => put(hx, hy + i, l, SKIN));
+        for (let i = 0; hy + 3 + i < CH; i++) put(hx + 14 + i, hy + 3 + i, '\\      \\', SKIN);
+      }
+
+      // die letzte Kippe funkelt, sobald sie aus der Schachtel kommt
+      if (last && rise > 0) {
+        const n = Math.min(9, 2 + rise);
+        for (let i = 0; i < n; i++) {
+          const h = (i * 37 + (t >> 1) * 101 + i * i * 13) >>> 0;
+          const dx = (h % 13) - 6, dy = ((h >> 4) % 13) - 2;
+          if (Math.abs(dx) < 2) continue;                 // nicht auf der Zigarette selbst
+          put(cx + 1 + dx, cigTop + dy, "*+.'"[h % 4], (h >> 2) % 2 ? '#ffffff' : HOT);
+        }
+        put(cx, cigTop, flick ? '.*.' : '.+.', HOT);
+      }
+    } else if (t >= 72) {
+      // --- Szene 2: Zigarette im Mund (ragt von unten ins Bild), Feuerzeug von rechts ---
+      const ty = lerp(CH, 13, 72, 78);
+      const lit = t >= 104, drag = t >= 118 && t < 130;
+      ['.-.', '| |', '| |', '| |', '/   \\', '|   |', '|   |', '|   |', '/     \\', '|     |',
+        '|#####|', '|#####|', '/#######\\', '|#######|', '|#######|', '|#######|', '|#######|'].forEach((l, i) => {
+        const x = 40 - (l.length >> 1), f = l.indexOf('#');
+        put(x, ty + i, l, brand.paper);
+        if (f > 0) put(x + f, ty + i, l.slice(f, l.lastIndexOf('#') + 1), brand.filterColor);
+      });
+      if (lit) {
+        if (last) put(39, ty, '(@)', '#ffffff');
+        else put(39, ty, drag ? '(@)' : flick ? '.*.' : '.+.', drag ? HOT : EMBER);
+        put(40, ty + 1, ':', '#8a8a8a');
+      }
+
+      // Feuerzeug samt Hand: fährt herein, zündet, fährt wieder hinaus
+      if (t >= 78 && t < 116) {
+        const lx = t < 110 ? lerp(72, 45, 78, 86) : lerp(45, 72, 110, 116);
+        const ly = t < 110 ? lerp(34, 15, 78, 86) : lerp(15, 34, 110, 116);
+        [' .-.', ' |:|@', '.---.', '|   |', '|   |', '|   |', '|   |', "'---'"].forEach((l, i) => put(lx, ly + i, l, METAL));
+        ['      .---.', '      (    \\', '       `.   \\', '(______  \\   |', '(______   |  |', '(______   |  |',
+          '(______  /   |', ' \\          /'].forEach((l, i) => put(lx - 1, ly + 1 + i, l, SKIN));
+        for (let y = ly + 9; y < CH; y++) put(lx - 1, y, '  |        |', SKIN);
+        if ((t >= 88 && t < 90) || (t >= 94 && t < 96)) put(lx + 1, ly - 1, flick ? "*'*" : "'*'", HOT);
+        if (t >= 100 && t < 110) {
+          put(lx + 1, ly - 1, '(|)', EMBER);
+          put(lx + 2, ly - 1, '|', HOT);
+          // die Flamme neigt sich zur Zigarettenspitze
+          if (t >= 102) put(lx - 3, ly - 2, flick ? '(((' : ' ((', HOT);
+          else put(lx + 1 + flick, ly - 2, ')', HOT);
+        }
+      }
+    }
+
+    // Rauch liegt vor allem anderen
+    for (const p of smoke) {
+      const a = p.life / p.max;
+      put(Math.round(p.x), Math.round(p.y), p.cs[Math.min(p.cs.length - 1, Math.floor((1 - a) * p.cs.length))],
+        p.color || brand.smoke[a > 0.66 ? 0 : a > 0.33 ? 1 : 2]);
+    }
+
+    for (const [y, s, c] of banners) {
+      const x = (CW - s.length) >> 1;
+      for (let i = -2; i < s.length + 2; i++) ch[y][x + i] = ' ';
+      put(x, y, s, c);
+    }
+
+    if (scene.id === 'intro' && t >= 150) {
+      const title = 'A S C I I - R A U C H E R P A U S E', sub = 'Rauchen, Kippen sammeln, Upgrades kaufen.';
+      put((CW - title.length) >> 1, 9, title, HOT);
+      put((CW - sub.length) >> 1, 11, sub, '#b8c4a6');
+    }
+    // Untertitel tippen sich oben ins Bild
+    for (const [a, b, s, c] of scene.captions)
+      if (t >= a && t < b) {
+        const x = (CW - s.length) >> 1;
+        for (let i = -2; i < s.length + 2; i++) ch[1][x + i] = ' ';
+        put(x, 1, s.slice(0, (t - a + 1) * 2), (c === 'char' ? char.color : c) || '#d8d8d8');
+      }
+
+    // Prestige: von der Glut aus breitet sich Licht aus, bis das ganze Bild darin aufgeht.
+    // Der helle Kern wird weiß gezeichnet und verschmilzt mit dem hell werdenden Hintergrund (#intro.light).
+    if (last && t >= 104) {
+      const R = (t - 104) * 2.2;
+      for (let y = 0; y < CH; y++)
+        for (let x = 0; x < CW; x++) {
+          const e = R - Math.hypot(x - 40, (y - 13) * 2);   // Zeichen sind etwa doppelt so hoch wie breit
+          if (e < 0) {
+            // vorauseilende Funken
+            if (e > -8 && (x * 7 + y * 13 + t * 3) % 11 === 0) { ch[y][x] = e > -4 ? '*' : '.'; cl[y][x] = HOT; }
+            continue;
+          }
+          ch[y][x] = e < 2 ? ':' : e < 4 ? '+' : e < 7 ? '*' : '#';
+          cl[y][x] = e < 7 ? HOT : '#ffffff';
+        }
+      if (t >= 134) {
+        const title = `* * *   P R E S T I G E   ${prestige}   * * *`, sub = 'Alles auf Anfang. Ein neuer Zigaretten-Stern.';
+        [[9, title], [11, sub]].forEach(([y, s]) => {
+          const x = (CW - s.length) >> 1;
+          for (let i = -2; i < s.length + 2; i++) ch[y][x + i] = ' ';   // etwas Luft um die Schrift
+          put(x, y, s, '#6b4a00');
+        });
+      }
+    }
+
+    let html = '';
+    for (let y = 0; y < CH; y++) {
+      let cur = '', buf = '';
+      const flush = () => { if (buf) html += cur ? `<span style="color:${cur}">${buf}</span>` : buf; buf = ''; };
+      for (let x = 0; x < CW; x++) {
+        if (cl[y][x] !== cur) { flush(); cur = cl[y][x]; }
+        buf += esc(ch[y][x]);
+      }
+      flush();
+      if (y < CH - 1) html += '\n';
+    }
+    return html;
+  }
+
+  function cutTick() {
+    const t = ++cut.t, sm = cut.smoke, scene = cut.scene, smoky = scene.id === 'intro';
+    if (scene.lightAt === t) introEl.classList.add('light');
+    // dünner Faden von der Glut, ab dem Ausatmen eine Wolke von unten (aus dem eigenen Mund)
+    if (smoky && t >= 104 && t < 150 && t % 2 === 0)
+      sm.push({ x: 40, y: 12, vx: rnd(-0.15, 0.15), vy: rnd(-0.4, -0.25), life: 30, max: 30, cs: '.:o~' });
+    if (smoky && t >= 131 && t < 152)
+      for (let i = 0; i < 9; i++) {
+        const life = Math.round(rnd(18, 40));
+        sm.push({ x: 40 + rnd(-4, 4), y: CH - 1, vx: rnd(-1.3, 1.3), vy: rnd(-1.1, -0.4), life, max: life, cs: 'OOo()~.' });
+      }
+    if (scene.id === 'jakob' && t >= 134)
+      for (let i = 0; i < 7; i++) {
+        const life = Math.round(rnd(8, 26));
+        sm.push({ x: rnd(0, CW - 1), y: CH - 1, vx: rnd(-0.1, 0.1), vy: rnd(-1.1, -0.5), life, max: life, cs: "^*'.",
+          color: Math.random() < 0.5 ? HOT : EMBER });
+      }
+    if (scene.id === 'ssj1') {
+      // Beben: Stummel lösen sich vom Boden
+      if (t >= 30 && t < 66) sm.push({ x: Math.random() < 0.5 ? rnd(4, 28) : rnd(52, 75), y: 27, vx: 0, vy: rnd(-0.35, -0.15), life: 30, max: 30, cs: '==-.', color: '#cfc6b0' });
+      // die frischen Haare rauchen
+      if (t >= 104 && t % 2 === 0) sm.push({ x: 40 + rnd(-6, 6), y: 9, vx: rnd(-0.15, 0.15), vy: rnd(-0.4, -0.25), life: 24, max: 24, cs: '.:o~' });
+    }
+    // goldene Aura links und rechts vom Kopf
+    if ((scene.id === 'ssj1' && t >= 68) || (scene.id === 'ssj100' && (t < 24 || t >= 150)))
+      for (let i = 0; i < 4; i++) {
+        const life = Math.round(rnd(8, 20));
+        sm.push({ x: 40 + (Math.random() < 0.5 ? -1 : 1) * rnd(10, 17), y: 28, vx: rnd(-0.1, 0.1), vy: rnd(-1.3, -0.6), life, max: life,
+          cs: "|^'.", color: '#ffe14a' });
+      }
+    if (scene.id === 'rally') {
+      const dust = (x, y, n) => {
+        for (let i = 0; i < n; i++) {
+          const life = Math.round(rnd(12, 34));
+          sm.push({ x: x + rnd(-3, 3), y: y + rnd(-2, 1), vx: rnd(-0.4, 0.5), vy: rnd(-0.35, 0), life, max: life, cs: 'O()o~.', color: '#b98a55' });
+        }
+      };
+      if (t >= 30 && t < 44) dust(1, 21, 1);                               // er kommt
+      if (t >= 44 && t < 66) dust(-38 + (t - 44) * 6 + 2, 23, 9);          // Staubfahne hinter dem Auto
+      // die liegengebliebene Kippe raucht
+      if (t >= 72 && t % 2 === 0) sm.push({ x: 68, y: 26, vx: rnd(-0.1, 0.2), vy: rnd(-0.4, -0.25), life: 24, max: 24, cs: '.:o~', color: '#9aa390' });
+    }
+    if (scene.id === 'obst') {
+      const fruit = (x, y, vx, vy, colors) => {
+        const life = Math.round(rnd(22, 40));
+        sm.push({ x, y, vx, vy, life, max: life, cs: 'oO@Oo.', color: colors[Math.floor(Math.random() * colors.length)] });
+      };
+      const MANGO = ['#ffb347', '#ff7eb6', '#ffe14a'], APFEL = ['#9be05a', '#3fbfbf', '#5fd05f'];
+      // erst die Mangowolke von links, dann Doppelapfel von rechts, dann hängt beides über Adrian
+      if (t >= 10 && t < 50) for (let i = 0; i < 3; i++) fruit(22, 19, rnd(0.4, 1.2), rnd(-0.5, 0.1), MANGO);
+      if (t >= 26 && t < 50) for (let i = 0; i < 3; i++) fruit(57, 20, rnd(-1.2, -0.4), rnd(-0.5, 0.1), APFEL);
+      if (t >= 50 && t < 92) for (let i = 0; i < 4; i++) fruit(rnd(26, 54), rnd(6, 17), rnd(-0.2, 0.2), rnd(-0.1, 0.1), i % 2 ? MANGO : APFEL);
+      // die Druckwelle fegt alles nach außen
+      if (t === 92) for (const p of sm) { p.vx = (p.x < 40 ? -1 : 1) * rnd(1.5, 3); p.vy = rnd(-1, 0.2); }
+      // draußen regnet es
+      if (t >= 150) for (let i = 0; i < 5; i++) sm.push({ x: rnd(0, CW + 10), y: 2, vx: -0.4, vy: 1.3, life: 15, max: 15, cs: '/', color: '#4a9bff' });
+    }
+    // Kippen Bewusstsein: Lichtpunkte in Regenbogenfarben steigen vom Berg auf
+    if (scene.id === 'eins' && t >= 112 && t < 150)
+      for (let i = 0; i < 5; i++) {
+        const life = Math.round(rnd(10, 26));
+        sm.push({ x: rnd(14, 66), y: rnd(18, 28), vx: rnd(-0.1, 0.1), vy: rnd(-1.1, -0.5), life, max: life, cs: "*'.",
+          color: RAINBOW[Math.floor(Math.random() * RAINBOW.length)] });
+      }
+    if (scene.id === 'helmut') {
+      // erst ein Faden von seiner Zigarette, der immer dichter wird; im Finale Funken überall; am Ende wieder ein Faden
+      if (t >= 40 && t < 80)
+        for (let i = 0; i < 1 + (t - 40 >> 3); i++) {
+          const life = Math.round(rnd(20, 40));
+          sm.push({ x: 43, y: 16, vx: rnd(-0.5, 0.9), vy: rnd(-0.6, -0.2), life, max: life, cs: '.:oO()~', color: '#9aa390' });
+        }
+      if (t >= 84 && t < 136)
+        for (let i = 0; i < 6; i++) {
+          const life = Math.round(rnd(8, 24));
+          sm.push({ x: rnd(0, CW - 1), y: CH - 1, vx: rnd(-0.1, 0.1), vy: rnd(-1.2, -0.5), life, max: life, cs: "^*'.",
+            color: Math.random() < 0.5 ? '#ffffff' : HOT });
+        }
+      if (t >= 140 && t % 2 === 0)
+        sm.push({ x: 52, y: 17, vx: rnd(-0.1, 0.2), vy: rnd(-0.4, -0.25), life: 34, max: 34, cs: '.:o~', color: '#7fd6c2' });
+    }
+    if (scene.boss !== undefined) {
+      const k = scene.boss, col = BOSSES[k].color;
+      // KippenDieb: Zigaretten fliegen im Bogen aus der Jacke
+      if (k === 0 && t >= 26 && t < 46)
+        for (let i = 0; i < 5; i++)
+          sm.push({ x: 40 + rnd(-6, 6), y: 15, vx: rnd(-1.6, 1.6), vy: rnd(-1.3, -0.3), g: 0.12, life: 80, max: 80, cs: '=',
+            color: Math.random() < 0.3 ? '#c98f4e' : '#f1ead8' });
+      // ArnoDübel: schnarcht
+      if (k === 1 && t >= 26 && t < 92 && t % 4 === 0)
+        sm.push({ x: 44, y: 13 + Math.max(0, (t - 50) / 4), vx: 0.2, vy: -0.3, life: 26, max: 26, cs: 'zzZZ', color: col });
+      if (k === 2) {
+        // Shisharaucher: erst Blasen aus der Pfeife, nach dem Knall Rauch überall
+        if (t >= 26 && t < 50) sm.push({ x: 40 + rnd(7, 12), y: 14, vx: 0, vy: rnd(-0.6, -0.3), life: 12, max: 12, cs: 'oO.', color: col });
+        if (t >= 52 && t < 70)                // bis zum Schriftzug (Tick 96) hat er sich verzogen
+          for (let i = 0; i < 14; i++) {
+            const life = Math.round(rnd(10, 26));
+            sm.push({ x: rnd(0, CW - 1), y: rnd(4, 27), vx: rnd(-0.3, 0.3), vy: rnd(-0.3, 0), life, max: life, cs: 'O@o()~.', color: col });
+          }
+      }
+      // E-Zigaretten Raucher: die Dampfwolken werden mit dem Akku dünner
+      if (k === 3 && t >= 26 && t < 56 && Math.random() < (56 - t) / 30)
+        sm.push({ x: 40 + rnd(-12, 12), y: 9, vx: rnd(-0.2, 0.2), vy: rnd(-0.4, -0.2), life: 18, max: 18, cs: '()o.', color: col });
+    }
+    // was fällt (g), bleibt auf dem Boden der Boss-Szenen (Zeile 23) liegen
+    for (const p of sm) if (p.g && p.y >= 23) { p.y = 23; p.vx = p.vy = p.g = 0; p.still = true; }
+    for (const p of sm) { if (p.still) { p.life--; continue; } if (p.g) p.vy += p.g; p.x += p.vx; p.y += p.vy; p.vx += rnd(-0.05, 0.05); p.life--; }
+    cut.smoke = sm.filter(p => p.life > 0 && p.y >= 0);
+    introSceneEl.innerHTML = cutFrame(scene, t, cut.smoke);
+    if (t >= scene.end) endCutscene();
+  }
+
+  function startCutscene(id) {
+    const scene = CUTSCENES.find(c => c.id === id);
+    if (!scene) return;
+    if (cut) { cutQueue.push(id); return; }     // erst die laufende zu Ende zeigen
+    cut = { scene, t: 0, smoke: [], t0: performance.now() };
+    if (document.activeElement) document.activeElement.blur();
+    introSceneEl.innerHTML = cutFrame(scene, 0, []);
+    introEl.classList.remove('out', 'light');
+    introEl.hidden = false;
+  }
+
+  // Ende oder Überspringen: Overlay ausblenden, Spiel läuft darunter sofort los
+  function endCutscene() {
+    if (!cut) return;
+    // der Bosskampf läuft nach echter Zeit: die verpasste Zeit hinten anhängen
+    const paused = performance.now() - cut.t0;
+    nextBossAt += paused;
+    if (boss) { boss.start += paused; boss.end += paused; }
+    if (!seenScenes.includes(cut.scene.id)) seenScenes.push(cut.scene.id);
+    cut = null;
+    introEl.classList.add('out');
+    setTimeout(() => { if (!cut) { introEl.hidden = true; introEl.classList.remove('light'); } }, 700);
+    renderScenes();
+    save();
+    if (cutQueue.length) startCutscene(cutQueue.shift());
+  }
+  introEl.addEventListener('click', endCutscene);
+  document.addEventListener('keydown', e => {
+    if (!cut || !['Escape', 'Enter', ' '].includes(e.key)) return;
+    e.preventDefault();
+    endCutscene();
+  });
+  // Geheimcode: diese Tastenfolge spielt die Afri-Rally ab
+  const SECRET = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight'];
+  const SECRET_ARROWS = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' };
+  let secretPos = 0;             // so viele Tasten der Folge stimmen schon
+  // auf window und in der Capture-Phase, damit die Folge ankommt, egal welcher Knopf gerade den Fokus hat
+  window.addEventListener('keydown', e => {
+    if (cut || e.repeat) return;                 // gehaltene Tasten zählen nur einmal
+    // ältere Browser melden "Up" statt "ArrowUp"
+    const key = /^(Up|Down|Left|Right)$/.test(e.key) ? 'Arrow' + e.key : e.key;
+    if (key === SECRET[secretPos]) secretPos++;
+    else secretPos = key !== SECRET[0] ? 0 : secretPos === 2 ? 2 : 1;   // ein drittes "hoch" zählt weiter als die letzten zwei
+    if (secretPos === SECRET.length) { secretPos = 0; startCutscene('rally'); return; }
+    // ab der dritten richtigen Taste zeigt die Statuszeile, wie weit man ist
+    if (secretPos >= 3) setStatus(SECRET.slice(0, secretPos).map(k => SECRET_ARROWS[k]).join(' ') + ' ...', 1500);
+  }, true);
+  // ---- Ende Cutscenes -----------------------------------------------------
+
+  // ---- Cutscene-Galerie: freigeschaltete Cutscenes noch einmal anschauen ----
+  const sceneListEl = document.getElementById('scenelist');
+  function renderScenes() {
+    sceneListEl.innerHTML = '';
+    for (const c of CUTSCENES) {
+      if (!c.always && !seenScenes.includes(c.id) && !(c.have && c.have()) && !(stories > c.story)) continue;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = `▶ Cutscene: ${c.name}`;
+      btn.addEventListener('click', () => startCutscene(c.id));
+      sceneListEl.appendChild(btn);
+    }
+  }
+  renderScenes();
+
   const MAX_STEPS = 8;           // schneller als 8x wird nicht animiert, sondern als Ertrag gutgeschrieben
   setInterval(() => {
+    if (cut) { cutTick(); return; }   // während der Cutscene steht das Spiel still
     loopTick++;
     if (phase === 'idle' && autoOn()) startCig();
     const speed = currentSpeed();
@@ -2084,8 +3107,10 @@
     if (loopTick % 55 === 0) save();
   }, TICK);
   syncPile();
+  renderScenes();                // erst jetzt steht die Berggröße fest (Cutscene "Der Gipfel")
   renderSpeed(1);
   renderHud();
+  if (firstStart) startCutscene('intro');
 })();
 </script>
 </body>
