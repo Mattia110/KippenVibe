@@ -123,18 +123,49 @@
   #bank { text-align: center; font-size: 1.05rem; color: #ffd24a; margin-bottom: 4px; }
   #rate { text-align: center; font-size: 0.8rem; color: var(--dim); margin-bottom: 12px; }
   #bulk { margin-bottom: 12px; }
-  #shop { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
-  #shop button {
+  #shop, #tempbuffs { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+  #shop button, #tempbuffs button {
     font: inherit; font-size: 0.8rem; text-align: left;
     background: #10130f; color: var(--fg);
     border: 1px solid #3a4234; padding: 8px 10px; cursor: pointer;
     display: flex; flex-direction: column; gap: 3px;
   }
-  #shop button:hover:not(:disabled) { border-color: #ffd24a; }
-  #shop button:active:not(:disabled) { transform: translateY(1px); }
-  #shop button:disabled { opacity: 0.4; cursor: default; }
-  #shop .un { color: #ffd24a; font-size: 0.9rem; }
-  #shop .ue { color: var(--dim); }
+  #shop button:hover:not(:disabled), #tempbuffs button:hover:not(:disabled) { border-color: #ffd24a; }
+  #shop button:active:not(:disabled), #tempbuffs button:active:not(:disabled) { transform: translateY(1px); }
+  #shop button:disabled, #tempbuffs button:disabled { opacity: 0.4; cursor: default; }
+  /* laufender Buff: grün, trotz "disabled" gut lesbar, und er funkelt (pulsierender Schein plus zwei blinkende Sterne) */
+  #tempbuffs button.on { opacity: 1; border-color: #5fd05f; position: relative; animation: buffglow 1s ease-in-out infinite alternate; }
+  #tempbuffs button.on .un { color: #5fd05f; }
+  #tempbuffs button.on::before, #tempbuffs button.on::after, #permbuffs span.on::after {
+    content: '✦'; position: absolute; color: #ffd24a; text-shadow: 0 0 6px #ffd24a; pointer-events: none;
+    animation: bufftwinkle 0.9s ease-in-out infinite alternate;
+  }
+  #tempbuffs button.on::before { top: 3px; right: 8px; }
+  #tempbuffs button.on::after { bottom: 3px; right: 26px; font-size: 0.7em; animation-delay: -0.45s; }
+  /* freigespielter Dauer-Buff: dezenter, ein einzelner Stern */
+  #permbuffs span.on { position: relative; padding-right: 24px; animation: buffglow 2s ease-in-out infinite alternate; }
+  #permbuffs span.on::after { top: 50%; right: 7px; transform-origin: center; margin-top: -0.6em; font-size: 0.8em; }
+  @keyframes buffglow {
+    from { box-shadow: 0 0 2px #3f8f2a; }
+    to { box-shadow: 0 0 10px #5fd05f, 0 0 18px #3f8f2a; }
+  }
+  @keyframes bufftwinkle {
+    from { opacity: 0.15; transform: scale(0.6) rotate(0deg); }
+    to { opacity: 1; transform: scale(1.25) rotate(45deg); }
+  }
+  /* Boss-Warnung in der Seitenleiste; der Platz bleibt reserviert, damit nichts springt */
+  #bosswarn {
+    visibility: hidden; color: #e0483a; border: 1px solid #e0483a; padding: 3px 10px; font-size: 0.8rem;
+    letter-spacing: 0.05em; animation: bosswarn 0.5s steps(2, jump-none) infinite;
+  }
+  #bosswarn.on { visibility: visible; }
+  @keyframes bosswarn { from { background: none; } to { background: #3a120c; } }
+  #buffhead { margin: 18px 0 8px; text-align: center; color: var(--dim); font-size: 0.85rem; }
+  #permbuffs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 8px; font-size: 0.8rem; }
+  #permbuffs span { border: 1px solid #2a2f26; padding: 5px 10px; color: var(--dim); }
+  #permbuffs span.on { color: #5fd05f; border-color: #3f8f2a; }
+  #shop .un, #tempbuffs .un { color: #ffd24a; font-size: 0.9rem; }
+  #shop .ue, #tempbuffs .ue { color: var(--dim); }
   #boss {
     background: none; border: 1px solid currentColor; padding: 8px 10px;
     font: inherit; font-size: clamp(10px, 2.6vw, 15px); text-align: left;
@@ -148,8 +179,15 @@
   #boss.hit pre { animation: none; transform: scale(0.96); filter: brightness(2.2); }
   #bossinfo { margin-top: 8px; font-size: 0.8rem; white-space: pre; text-align: center; color: var(--fg); }
   @keyframes bossbob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-  #storylist { margin-top: 12px; }
-  #scenelist { margin-top: 12px; }
+  /* aufklappbare Ordner für gekaufte Storys und freigeschaltete Cutscenes */
+  .folder { margin-top: 12px; border: 1px solid #2a2f26; }
+  .folder[hidden] { display: none; }
+  .folder summary { cursor: pointer; padding: 7px 12px; text-align: center; color: var(--dim); font-size: 0.85rem; user-select: none; }
+  .folder summary:hover { color: var(--fg); }
+  .folder[open] { border-color: var(--dim); }
+  .folder[open] summary { color: #ffd24a; }
+  .folder .picker { padding: 4px 10px 0; }
+  .folder #storytext { margin-bottom: 12px; }
   #storytext {
     max-width: 640px; margin: 4px auto 0; padding: 12px 16px;
     border: 1px solid #ffd24a; background: #10130f; font-size: 0.9rem; line-height: 1.6;
@@ -185,6 +223,7 @@
     <div class="side">
       <button id="boss" type="button" hidden><div id="bossname"></div><div id="bosshp"><div id="bosshpfill"></div></div><pre id="bossart"></pre><div id="bossinfo"></div></button>
       <button id="pack" type="button" aria-label="Zigarettenschachtel"></button>
+      <div id="bosswarn" aria-live="polite"></div>
       <button id="turbo" type="button">[ SCHNELLER ZIEHEN ]</button>
       <div id="speed"></div>
       <div id="status" aria-live="polite"></div>
@@ -197,12 +236,21 @@
     <div id="rate"></div>
     <div id="bulk" class="picker" role="group" aria-label="Kaufmenge"></div>
     <div id="shop"></div>
+    <div id="buffhead">Buffs</div>
+    <div id="permbuffs"></div>
+    <div id="tempbuffs"></div>
     <button id="prestige" type="button" hidden></button>
     <button id="saiyan" type="button"></button>
     <button id="storybuy" type="button"></button>
-    <div id="storylist" class="picker"></div>
-    <div id="storytext" hidden></div>
-    <div id="scenelist" class="picker" role="group" aria-label="Cutscenes"></div>
+    <details id="storyfolder" class="folder" hidden>
+      <summary></summary>
+      <div id="storylist" class="picker"></div>
+      <div id="storytext" hidden></div>
+    </details>
+    <details id="scenefolder" class="folder">
+      <summary></summary>
+      <div id="scenelist" class="picker" role="group" aria-label="Cutscenes"></div>
+    </details>
   </section>
 
   <button id="reset" type="button">Fortschritt zurücksetzen</button>
@@ -504,7 +552,39 @@
     { id: 'urknall',  name: 'Urknall-Zigarre',     cost: 2.5e12,     kps: 45e9,     fx: '+45 Mrd. Kippen/s' }
   ].sort((a, b) => a.cost - b.cost);
   const owned = Object.fromEntries(UPGRADES.map(u => [u.id, 0]));
-  const perCig = () => 1 + owned.glueck + 100 * owned.filter;
+  // ---- Buffs --------------------------------------------------------------
+  // fx = Wirkung: kps (automatische Kippen), cig (Kippen pro Zigarette), shiny (Shiny-Kippe), visitor (Besucher-Klick)
+  // und price (Upgrade-Preise) sind Faktoren, speed ist ein Zuschlag aufs Rauchtempo. Alles Aktive multipliziert sich.
+  // Dauerhafte Buffs gelten automatisch, sobald insgesamt need Kippen geraucht sind.
+  const PERM_BUFFS = [
+    { id: 'harz1', name: 'Harz 1', need: 1e4,  fx: { kps: 1.1 },   text: '+10 % automatische Kippen' },
+    { id: 'harz2', name: 'Harz 2', need: 1e6,  fx: { cig: 1.25 },  text: '+25 % Kippen pro Zigarette' },
+    { id: 'harz3', name: 'Harz 3', need: 1e8,  fx: { price: 0.9 }, text: 'Upgrades 10 % günstiger' },
+    { id: 'harz4', name: 'Harz 4', need: 1e10, fx: { kps: 1.5, visitor: 2 }, text: '+50 % automatische Kippen, Besucher geben das Doppelte' }
+  ];
+  // Kaufbare Buffs auf Zeit: secs = Laufzeit, danach cool Sekunden Pause, bis man ihn wieder kaufen kann.
+  // Preis = base + pay Sekunden des eigenen Einkommens (ohne Buffs gerechnet). pay ist kleiner als der Mehrertrag
+  // der Laufzeit (z. B. x3 für 120 s bringt 240 s Einkommen und kostet 120), der Kauf lohnt sich also immer.
+  const TEMP_BUFFS = [
+    { id: 'kalt',      name: 'Kaltes Wetter',   secs: 60,  cool: 120, base: 200,  pay: 30,  fx: { kps: 2, speed: 3 },
+      text: 'schnell rauchen, schnell wieder rein: x2 automatische Kippen, +3x Rauchtempo' },
+    { id: 'obdach',    name: 'Obdachlosigkeit', secs: 120, cool: 240, base: 1000, pay: 120, fx: { kps: 3 },
+      text: 'den ganzen Tag draußen: x3 automatische Kippen' },
+    { id: 'zahltag',   name: 'Zahltag',         secs: 30,  cool: 90,  base: 500,  pay: 60,  fx: { kps: 5, cig: 5, visitor: 5 },
+      text: 'x5 automatische Kippen, x5 pro Zigarette, Besucher geben das Fünffache' },
+    { id: 'flohmarkt', name: 'Flohmarkt',       secs: 60,  cool: 180, base: 2000, pay: 20,  fx: { price: 0.7 },
+      text: 'Upgrades 30 % günstiger' },
+    { id: 'nacht',     name: 'Nachtschicht',    secs: 180, cool: 360, base: 5000, pay: 90,  fx: { kps: 2, cig: 2, shiny: 5 },
+      text: 'x2 automatische Kippen, x2 pro Zigarette, Shiny-Kippe x5' }
+  ];
+  let buffTimes = {};            // id -> { until, ready }: läuft bis / wieder kaufbar ab (Zeitpunkte wie Date.now())
+  const buffActive = b => (buffTimes[b.id] || {}).until > Date.now();
+  const buffsOn = () => [...PERM_BUFFS.filter(b => smoked >= b.need), ...TEMP_BUFFS.filter(buffActive)];
+  const buffMult = k => buffsOn().reduce((m, b) => m * (b.fx[k] || 1), 1);
+  const buffAdd = k => buffsOn().reduce((sum, b) => sum + (b.fx[k] || 0), 0);
+  const buffCost = b => Math.ceil(b.base + (kpsBase() + owned.slot * SLOT_AVG) * b.pay);
+
+  const perCig = () => (1 + owned.glueck + 100 * owned.filter) * buffMult('cig');
 
   // Slotmachine: 3 Walzen mit 4 Symbolen. Erwartungswert pro Spin und Automat ~314 Kippen.
   const SLOT_SYMS = '7$#@', SLOT_EVERY = 60;   // Spin alle 60 Ticks (5,4 s)
@@ -591,8 +671,10 @@
   let visitor = null, nextVisitor = 150;   // in Loop-Ticks (erster nach ~13 s)
   // jeder Kauf macht das nächste Exemplar 15 % teurer
   const PRICE_GROWTH = 1.15;
-  const priceOf = u => Math.ceil(u.cost * Math.pow(PRICE_GROWTH, owned[u.id]));
-  const kps = () => UPGRADES.reduce((sum, u) => sum + (u.kps || 0) * owned[u.id], 0);
+  const priceOf = u => Math.ceil(u.cost * Math.pow(PRICE_GROWTH, owned[u.id]) * buffMult('price'));
+  // automatische Kippen pro Sekunde: kpsBase ohne Buffs (Grundlage der Buff-Preise), kps mit Buffs
+  const kpsBase = () => UPGRADES.reduce((sum, u) => sum + (u.kps || 0) * owned[u.id], 0);
+  const kps = () => kpsBase() * buffMult('kps');
   const autoOn = () => UPGRADES.some(u => owned[u.id] > 0);
 
   let smoked = 0;                // insgesamt geraucht (schaltet Charaktere frei)
@@ -623,6 +705,7 @@
   const STORE = 'ascii-raucherpause';
   let firstStart = false;      // noch kein Spielstand vorhanden: Intro-Cutscene zeigen
   let seenScenes = [];         // IDs der schon gesehenen Cutscenes (zum erneuten Anschauen)
+  let foldersOpen = { stories: false, scenes: false };   // welche Ordner (Storys, Cutscenes) aufgeklappt sind
   const BULK_MODES = [1, 10, 100, 'max'];
   let bulk = 1;                // Kaufmenge im Shop: 1, 10, 100 oder 'max' (so viele, wie man sich leisten kann)
   try {
@@ -640,9 +723,14 @@
     if (Number.isInteger(s.saiyan) && s.saiyan > 0) saiyan = s.saiyan;
     if (Array.isArray(s.scenes)) seenScenes = s.scenes.filter(id => typeof id === 'string');
     if (BULK_MODES.includes(s.bulk)) bulk = s.bulk;
+    if (s.folders) foldersOpen = { stories: !!s.folders.stories, scenes: !!s.folders.scenes };
+    for (const b of TEMP_BUFFS) {
+      const v = s.buffs && s.buffs[b.id];
+      if (v && typeof v.until === 'number' && typeof v.ready === 'number') buffTimes[b.id] = { until: v.until, ready: v.ready };
+    }
   } catch (e) {}
   const save = () => {
-    try { localStorage.setItem(STORE, JSON.stringify({ smoked, bank, owned, char: char.id, prestige, stories, bossWins, saiyan, scenes: seenScenes, bulk })); } catch (e) {}
+    try { localStorage.setItem(STORE, JSON.stringify({ smoked, bank, owned, char: char.id, prestige, stories, bossWins, saiyan, scenes: seenScenes, bulk, folders: foldersOpen, buffs: buffTimes })); } catch (e) {}
   };
 
   let phase = 'idle', t = 0, cigLen = 0, tick = 0, ox = 0;
@@ -677,6 +765,8 @@
     }
     if (prev < BUFF_NEED && smoked >= BUFF_NEED)
       setStatus('★ Passiver Buff freigeschaltet: Bürgergeld! Merz schaut jetzt vorbei. ★', 4000);
+    const nb = PERM_BUFFS.filter(b => b.need > prev && b.need <= smoked).pop();
+    if (nb) setStatus(`★ Buff freigeschaltet: ${nb.name}! ${nb.text}. ★`, 4000);
     const ub = BRANDS.filter(b => b.need > prev && b.need <= smoked).pop();
     if (ub) {
       setStatus(ub.legend ? `★★★ LEGENDÄR: ${ub.name}! ★★★` : `★ Neue Sorte: ${ub.name}! ★`, 3000);
@@ -965,7 +1055,7 @@
     // 500 Kippen x (Stummel im Berg)^1,5 x (1 + Saiyajin-Stufe)^2, jedes Prestige verdoppelt.
     // Berg und Saiyajin-Stufen wirken also überproportional: doppelter Berg = 2,8-fach, Stufe 9 = 100-fach.
     const bonus = Math.round(SHINY_BONUS * Math.pow(Math.max(1, pileCount), SHINY_PILE_EXP) * Math.pow(2, prestige)
-      * Math.pow(1 + saiyan, SHINY_SAIYAN_EXP));
+      * Math.pow(1 + saiyan, SHINY_SAIYAN_EXP) * buffMult('shiny'));
     addKippen(bonus);
     setStatus(`★ Shiny-Kippe! +${fmt(bonus)} Kippen ★`, 2500);
     save();
@@ -1036,7 +1126,7 @@
     for (let k = 0; k < 6; k++)
       spawn(hit.x, hit.y, rnd(-1.2, 1.2), rnd(-0.9, 0.1), rnd(8, 16), 'spark', { color: HOT, front: true });
     // jedes Prestige verdoppelt die Klick-Belohnung der Besucher
-    const bonus = hit.bonus * Math.pow(2, prestige);
+    const bonus = hit.bonus * Math.pow(2, prestige) * buffMult('visitor');
     addKippen(bonus);
     setStatus(`${hit.name} erwischt! +${fmt(bonus)} Kippen` + (prestige ? ` (x${fmt(Math.pow(2, prestige))} Prestige)` : ''), 2000);
     save();
@@ -1534,6 +1624,7 @@
     if (!confirm('Wirklich den ganzen Fortschritt löschen?')) return;
     smoked = 0; bank = 0; prestige = 0; stories = 0; bossWins = 0; saiyan = 0;
     seenScenes = [];
+    buffTimes = {};
     renderHair();
     if (boss) endBoss();
     renderStories(); showStory(-1);
@@ -1574,7 +1665,7 @@
     // ohne Klicks Standardtempo (1x). Der Klick-Bonus wächst quadratisch mit den Klicks/Sekunde:
     // 5/s = +6x, 10/s = +20x, 15/s = +41x, 20/s = +70x (Maximum)
     const c = Math.min(MAX_CPS, clicks.length);
-    return 1 + owned.bier * 0.5 + 0.5 * c + 0.15 * c * c;
+    return 1 + owned.bier * 0.5 + 0.5 * c + 0.15 * c * c + buffAdd('speed');
   }
 
   function renderSpeed(speed) {
@@ -1601,7 +1692,8 @@
   // Was ein Klick bei der gewählten Kaufmenge kauft: n Exemplare zum Gesamtpreis cost (jedes Exemplar 15 % teurer).
   // Bei 'max' so viele, wie das Konto hergibt; reicht es nicht einmal für eines, steht dort der Preis für eines.
   function bulkOf(u) {
-    const each = i => Math.ceil(u.cost * Math.pow(PRICE_GROWTH, owned[u.id] + i));
+    const off = buffMult('price');
+    const each = i => Math.ceil(u.cost * Math.pow(PRICE_GROWTH, owned[u.id] + i) * off);
     let n = 0, cost = 0;
     if (bulk === 'max') {
       while (n < 1000 && cost + each(n) <= bank) cost += each(n++);
@@ -1644,6 +1736,46 @@
     shopEl.appendChild(btn);
     return { u, btn, name, price };
   });
+
+  // ---- Buffs im Shop --------------------------------------------------------
+  const permRows = PERM_BUFFS.map(b => {
+    const el = document.createElement('span');
+    document.getElementById('permbuffs').appendChild(el);
+    return { b, el };
+  });
+  const tempRows = TEMP_BUFFS.map(b => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const name = document.createElement('span'); name.className = 'un'; name.textContent = b.name;
+    const fx = document.createElement('span'); fx.className = 'ue'; fx.textContent = `${b.text} · ${b.secs} s lang`;
+    const state = document.createElement('span');
+    btn.append(name, fx, state);
+    btn.addEventListener('click', () => {
+      const now = Date.now(), t = buffTimes[b.id], cost = buffCost(b);
+      if ((t && now < t.ready) || bank < cost) return;
+      bank -= cost;
+      buffTimes[b.id] = { until: now + b.secs * 1000, ready: now + (b.secs + b.cool) * 1000 };
+      save();
+      setStatus(`Buff gekauft: ${b.name} (${b.secs} s)`, 2500);
+      renderHud();
+    });
+    document.getElementById('tempbuffs').appendChild(btn);
+    return { b, btn, state };
+  });
+  function renderBuffs() {
+    const now = Date.now(), left = ms => Math.ceil(ms / 1000);
+    for (const { b, el } of permRows) {
+      const on = smoked >= b.need;
+      setText(el, `${b.name}: ${b.text} · ` + (on ? 'aktiv' : `ab ${fmt(b.need)} gerauchten Kippen`));
+      el.className = on ? 'on' : '';
+    }
+    for (const { b, btn, state } of tempRows) {
+      const t = buffTimes[b.id] || { until: 0, ready: 0 }, on = now < t.until, cost = buffCost(b);
+      setText(state, on ? `aktiv: noch ${left(t.until - now)} s` : now < t.ready ? `wieder kaufbar in ${left(t.ready - now)} s` : `Preis: ${fmt(cost)} Kippen`);
+      btn.className = on ? 'on' : '';
+      btn.disabled = now < t.ready || bank < cost;
+    }
+  }
 
   // ---- Kippen-Storys ------------------------------------------------------
   const STORIES = [
@@ -1716,7 +1848,16 @@
     renderStories();
   }
 
+  // Ordner auf- und zuklappen merken
+  const storyFolderEl = document.getElementById('storyfolder');
+  storyFolderEl.open = foldersOpen.stories;
+  storyFolderEl.addEventListener('toggle', () => {
+    if (foldersOpen.stories !== storyFolderEl.open) { foldersOpen.stories = storyFolderEl.open; save(); }
+  });
+
   function renderStories() {
+    storyFolderEl.hidden = !stories;
+    storyFolderEl.querySelector('summary').textContent = `Kippen-Storys (${stories} von ${STORY_MAX})`;
     storyListEl.innerHTML = '';
     for (let i = 0; i < stories; i++) {
       const btn = document.createElement('button');
@@ -1737,6 +1878,7 @@
     const won = STORY_TITLES.find(([n]) => n === stories);
     setStatus(won ? `★★★ ${stories} Storys! Neuer Titel: „${won[1]}“ ★★★`
       : `Neue Kippen-Story: ${STORIES[stories - 1].t}`, 4000);
+    storyFolderEl.open = true;   // die neue Story soll man gleich lesen können
     showStory(stories - 1);
     renderHud(); draw();
     const sc = CUTSCENES.find(c => c.story === stories - 1);
@@ -1835,6 +1977,7 @@
       setText(r.price, bulk === 1 ? `Preis: ${fmt(cost)} Kippen` : `${n} Stück: ${fmt(cost)} Kippen`);
       r.btn.disabled = bank < cost;
     }
+    renderBuffs();
   }
 
   // ---- Bosskämpfe ---------------------------------------------------------
@@ -1902,6 +2045,7 @@
     { secs: 90,  pay: 20, time: 50 },
     { secs: 150, pay: 30, time: 60 }
   ];
+  const BOSS_WARN = 10000;            // so viele ms vor dem Auftauchen erscheint die Warnung
   const BOSS_GAP = [60000, 120000];   // Pause zwischen zwei Bossen in ms (1 bis 2 min, nach der Uhr)
   // Extra seltener Bonus-Boss: muss nicht besiegt werden. Er bleibt 30 s, und jeder Klick gibt Kippen
   // wie bei einem Besucher (click, verdoppelt sich mit jedem Prestige). chance = Anteil der Boss-Auftritte.
@@ -1988,8 +2132,13 @@
     return true;
   }
 
+  const bossWarnEl = document.getElementById('bosswarn');
   function bossTick() {
     const now = performance.now();
+    // Vorwarnung: die letzten Sekunden herunterzählen
+    const due = nextBossAt - now, warn = !boss && due > 0 && due <= BOSS_WARN;
+    if (warn) setText(bossWarnEl, `! BOSS IN ${Math.ceil(due / 1000)} s !`);
+    bossWarnEl.classList.toggle('on', warn);
     if (!boss) {
       if (now >= nextBossAt) startBoss(now);
       return;
@@ -3563,6 +3712,7 @@
     const paused = performance.now() - cut.t0;
     nextBossAt += paused;
     if (boss) { boss.start += paused; boss.end += paused; }
+    for (const v of Object.values(buffTimes)) { v.until += paused; v.ready += paused; }
     if (!seenScenes.includes(cut.scene.id)) seenScenes.push(cut.scene.id);
     cut = null;
     introEl.classList.add('out');
@@ -3596,16 +3746,24 @@
 
   // ---- Cutscene-Galerie: freigeschaltete Cutscenes noch einmal anschauen ----
   const sceneListEl = document.getElementById('scenelist');
+  const sceneFolderEl = document.getElementById('scenefolder');
+  sceneFolderEl.open = foldersOpen.scenes;
+  sceneFolderEl.addEventListener('toggle', () => {
+    if (foldersOpen.scenes !== sceneFolderEl.open) { foldersOpen.scenes = sceneFolderEl.open; save(); }
+  });
   function renderScenes() {
     sceneListEl.innerHTML = '';
+    let n = 0;
     for (const c of CUTSCENES) {
       if (!c.always && !seenScenes.includes(c.id) && !(c.have && c.have()) && !(stories > c.story)) continue;
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = `▶ Cutscene: ${c.name}`;
+      btn.textContent = `▶ ${c.name}`;
       btn.addEventListener('click', () => startCutscene(c.id));
       sceneListEl.appendChild(btn);
+      n++;
     }
+    sceneFolderEl.querySelector('summary').textContent = `Cutscenes (${n} von ${CUTSCENES.length})`;
   }
   renderScenes();
 
