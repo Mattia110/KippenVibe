@@ -421,6 +421,15 @@
       say: { drag: '*zieht schaurig*', exhale: '*huuuuuh*', idle: 'Glaubst du an Geister?' }
     },
     {
+      id: 'power', name: 'Power', need: 5000000,
+      frame: '#f29a2e', accent: '#ffe08a',
+      art: ['\\\\|||//', '-( o o )-', 'P O W E R', 'brüllend stark'],
+      len: 7, filter: '[#]', filterColor: '#f29a2e', paper: '#f1ead8',
+      smoke: ['#ffe8b0', '#d9a050', '#7a5228'],
+      exhale: 'lion', exDur: 14, drag: 8, rest: 10, lighter: 'zippo', hat: null,
+      say: { drag: '*zieht mit voller Power*', exhale: '*ROOAAAARRR*', idle: 'König der Kippen. Eine?' }
+    },
+    {
       id: 'matrix', name: 'JPS', need: 25000000,
       frame: '#3fdf5f', accent: '#d8ffd8',
       art: ['1 0 1 1 0 1', 'J P S', '0 1 0 0 1 0', 'rote Pille'],
@@ -451,6 +460,13 @@
   const BUBBLES = ['#9ad0ff', '#ffb8e0', '#d8fff4', '#fff6c8'];
   const RAINBOW =['#b06aff', '#4a9bff', '#5fd05f', '#ffe14a', '#ff9a2a', '#ff4a4a'];
   const STARS = ['#ffd24a', '#ffffff', '#9ad0ff', '#fff6c8'];
+  // Rauch-Löwe der Sorte Power: Mähne und Gesicht als zwei Ebenen (Spalte 8 = Mitte, Zeile 2 = Augenhöhe)
+  const LION_MANE = ['   .\\\\\\|///.', '  \\\\       //', ' -=           =-', ' -=           =-', '  //         \\\\', "   '///|\\\\\\'"];
+  const LION_FACE = ['', '      .---.', '     ( o o )', '      \\ w /', "      '---'"];
+  const LION_ROAR = ['', '      .---.', '     ( > < )', '      /VVV\\', '      \\^^^/'];
+  const MANE = '#d9822b', LION = '#ffd24a';
+  // Lebensabschnitte (Anteil der Restlebenszeit): Jungtier > 0,68 > ausgewachsen, brüllt zwischen 0,6 und 0,3, zerfällt unter 0,18
+  const lionRoars = p => p.life / p.max <= 0.6 && p.life / p.max > 0.3;
 
   // ---- Charaktere ---------------------------------------------------------
   // Zeilen: {E} = Auge, {M} = Mund (3 Zeichen). Mund muss in Spalte 12-14 bleiben.
@@ -489,7 +505,27 @@
              '  {|        {M}|', '  { \\         /', "  {  '--. .--'", "    .---' '---.", '   /           \\']
     },
     {
-      id: 'mario', name: 'Mario', need: 25, color: '#ffd24a', eye: '*',
+      // Basecap mit Schirm nach vorn, Kapuzenpulli mit Kordeln.
+      // Die Cap steckt schon in den Zeilen; der leere eigene Hut sorgt dafür, dass kein Hut der Marke darüber sitzt.
+      id: 'martin', name: 'Martin', need: 25, color: '#7fd8d0', eye: 'o', hat: [],
+      rows: ['     .-------.', '    /_________\\___', '   |        {E}  |', '   |           >',
+             '   |        {M}|', '    \\         /', "     '--. .--'", "    .---' '---.", '   /    | |    \\']
+    },
+    {
+      // Kopfhörer (Bügel über den Kopf, Muschel am Ohr) und Kinnbart
+      id: 'fady', name: 'Fady', need: 30, color: '#ff9ec8', eye: 'o',
+      rows: ['     .=======.', '    /|        \\', '   |(#)     {E}  |', '   |(#)        >',
+             '   |        {M}|', '    \\      vvv/', "     '--. .--'", "    .---' '---.", '   /           \\']
+    },
+    {
+      // Wikingerhelm mit Hörnern (eigene Kopfbedeckung) und langer geflochtener Bart
+      id: 'retadon', name: 'Retadon', need: 35, color: '#ff9a5a', eye: 'o', hatColor: '#e8dcc0',
+      hat: ['   (\\   .---.   /)', '    \\\\ /     \\ //'],
+      rows: ['     \\[=======]/', '    /         \\', '   |        {E}  |', '   |           >',
+             '   |   %%%%%{M}|', '    \\%%%%%%%%/', "     '%%%%%.-'", "    .---%%%---.", '   /    %%%    \\']
+    },
+    {
+      id: 'mario', name: 'Mario', need: 40, color: '#ffd24a', eye: '*',
       rows: ['     .--|||--.', '    /   |||   \\', '   |        {E}  |', '   |           >',
              '   |        {M}|', '    \\         /', "     '--. .--'", "    .---'o'---.", '   /   \\_o_/   \\']
     },
@@ -874,7 +910,7 @@
   function face() {
     const closed = phase === 'drag' || phase === 'hold' || phase === 'cough';
     let mouth = '---';
-    if (phase === 'exhale') mouth = brand.exhale === 'rings' ? '--O' : '--o';
+    if (phase === 'exhale') mouth = brand.exhale === 'rings' || brand.exhale === 'lion' ? '--O' : '--o';
     if (phase === 'hold') mouth = '--=';
     if (phase === 'cough') mouth = t % 2 ? '--O' : '--o';
     let eye = closed ? '-' : char.eye;
@@ -1235,6 +1271,10 @@
         spawn(mx, my + rnd(-0.3, 0.3), rnd(0.4, 1), rnd(-0.4, -0.1), rnd(20, 40));
         if (t === 1 || t === 6) spawn(mx + 1, my, 0.6, -0.13, 60, 'ghost');
         break;
+      case 'lion':     // aus dem Rauch wächst ein Löwenkopf, der brüllt und wieder zu Rauch zerfällt
+        if (t % 2) spawn(mx, my + rnd(-0.3, 0.3), rnd(0.4, 1.1), rnd(-0.45, -0.1), rnd(20, 40));
+        if (t === 1) spawn(mx + 1, my, 0.9, -0.22, 56, 'lion');
+        break;
       case 'matrix':   // Code strömt aus dem Mund und regnet in Spalten herab
         spawn(mx, my, rnd(1, 2), rnd(-0.5, -0.1), rnd(10, 20), 'glyph', { chars: '01', rate: 2, color: '#3fdf5f' });
         for (let i = 0; i < 3; i++)
@@ -1327,8 +1367,14 @@
             spawn(p.x, p.y, Math.cos(ang) * 1.5 * v, Math.sin(ang) * 0.75 * v, rnd(10, 18), 'glyph',
               { chars: '*+.', rate: 5, color: p.color, g: 0.02, dragF: 0.92 });
           }
-      } else if (p.kind === 'ring' || p.kind === 'skull' || p.kind === 'ghost') {
+      } else if (p.kind === 'ring' || p.kind === 'skull' || p.kind === 'ghost' || p.kind === 'lion') {
         p.x += p.vx; p.y += p.vy; p.vx *= 0.975;
+        // beim Brüllen laufen Schallwellen nach links und rechts weg (nach links nur kurz, sonst landen sie im Gesicht)
+        if (p.kind === 'lion' && lionRoars(p) && p.life % 3 === 0)
+          for (const d of [-1, 1])
+            for (const dy of [-1, 0, 1])
+              spawn(p.x + d * (9 - Math.abs(dy)), p.y + 0.5 + dy * 1.5, d * 1.1, 0, d > 0 ? 9 : 5, 'glyph',
+                { chars: d > 0 ? ')' : '(', color: '#fff6c8', dragF: 1 });
       } else if (p.kind === 'bolt') {
         // Blitze stehen still und verlöschen
       } else if (p.kind === 'glyph') {
@@ -1407,6 +1453,32 @@
           put(x + 1, y - 1, '.-.', c); put(x, y, '(o o)', c);
           put(x, y + 1, Math.floor(p.life / 3) % 2 ? '|/\\/|' : '|\\/\\|', c);
         }
+      } else if (p.kind === 'lion') {
+        // räumt die Fläche des Löwen frei, damit der übrige Rauch nicht durch die Mähne scheint
+        const clear = (x0, y0, n) => {
+          for (let k = 0; k < n; k++)
+            if (y0 >= 0 && y0 < H && x0 + k >= 0 && x0 + k < W) { ch[y0][x0 + k] = ' '; cl[y0][x0 + k] = ''; }
+        };
+        if (a > 0.85) put(x, y, '(:)', c);
+        else if (a > 0.68) {
+          // Jungtier
+          for (let i = -1; i <= 1; i++) clear(x - 3, y + i, 7);
+          put(x - 2, y - 1, '.^^^.', MANE); put(x - 3, y, '{     }', MANE); put(x - 2, y, '(o.o)', LION); put(x - 2, y + 1, "'vvv'", MANE);
+        } else {
+          // ausgewachsen; beim Brüllen zittert er, am Ende fallen immer mehr Zeichen weg und der Rest wird Rauch
+          const roar = lionRoars(p), fade = a < 0.18, lx = x - 8 + (roar ? p.life % 2 : 0), ly = y - 2;
+          if (!fade) LION_MANE.forEach((l, i) => { const s = l.search(/\S/); clear(lx + s, ly + i, l.trimEnd().length - s); });
+          const layer = (lines, col) => lines.forEach((l, i) => {
+            for (let k = 0; k < l.length; k++)
+              if (!fade || (k + i + p.life) % 3) put(lx + k, ly + i, l[k], fade ? c : col);
+          });
+          layer(LION_MANE, MANE);
+          layer(roar ? LION_ROAR : LION_FACE, LION);
+          if (roar) {
+            const s = 'RO' + 'A'.repeat(1 + Math.min(4, Math.floor((0.6 - a) * 25))) + 'R!';
+            put(x - (s.length >> 1), ly - 2, s, p.life % 2 ? HOT : '#ffffff');
+          }
+        }
       } else if (p.kind === 'spark') {
         put(x, y, a > 0.5 ? '*' : '+', p.color || '#ffffff');
       } else {
@@ -1429,7 +1501,8 @@
         put(x + 1, y, 'BIER', '#f1ead8');
       }
     }
-    for (const p of particles) if (!p.front) drawP(p);
+    for (const p of particles) if (!p.front && p.kind !== 'lion') drawP(p);
+    for (const p of particles) if (p.kind === 'lion') drawP(p);   // Löwen über dem übrigen Rauch
 
     // Kippenberg
     for (let i = 0; i < PILE_W; i++)
@@ -1839,7 +1912,7 @@
     { t: 'Daniel und der Hamster',
       s: 'Daniel kaufte einen Hamster fürs Rauchrad. Der Hamster lief drei Tage, dann verlangte er Urlaub, Weihnachtsgeld und eine eigene Marke. Daniel raucht seitdem wieder selbst.' },
     { t: 'Kippen Bewusstsein',
-      s: 'Am Ende saßen alle zusammen auf dem Kippenberg: Daniel, Adrian, Mattia, Tomas, Robin, Mario und Jakob. Keiner sagte etwas. Der Erfasser zählte den Rauch. Und für einen Moment waren alle eins mit der Kippe.' }
+      s: 'Am Ende saßen alle zusammen auf dem Kippenberg: Daniel, Adrian, Mattia, Tomas, Robin, Martin, Fady, Retadon, Mario und Jakob. Keiner sagte etwas. Der Erfasser zählte den Rauch. Und für einen Moment waren alle eins mit der Kippe.' }
   ];
   const storyBuyEl = document.getElementById('storybuy');
   const storyListEl = document.getElementById('storylist');
@@ -2876,7 +2949,7 @@
       id: 'eins', name: 'Kippen Bewusstsein', end: 198, lightAt: 150, story: STORIES.findIndex(s => s.t === 'Kippen Bewusstsein'),
       captions: [
         [4, 26, 'Am Ende saßen alle zusammen auf dem Kippenberg.'], [30, 52, 'Keiner sagte etwas. Der Erfasser zählte den Rauch.'],
-        [60, 104, 'Sieben Rauchfäden. Eine Kippe.'], [112, 148, 'Und für einen Moment waren alle eins mit der Kippe.']
+        [60, 104, 'Zehn Rauchfäden. Eine Kippe.'], [112, 148, 'Und für einen Moment waren alle eins mit der Kippe.']
       ]
     },
     {
@@ -3016,8 +3089,9 @@
         put(73, 20, ' o', sh.color); put(73, 21, '/|\\', sh.color); put(77, 19, flick ? '.' : 'o', sh.color);
       }
     } else if (scene.id === 'eins') {
-      const crew = ['daniel', 'adrian', 'mattia', 'tomas', 'robin', 'mario', 'jakob'].map(id => CHARS.find(c => c.id === id));
-      const fx = i => 19 + i * 6, one = t >= 112, rise = one ? Math.round((t - 112) * 0.7) : 0;
+      const crew = ['daniel', 'adrian', 'mattia', 'tomas', 'robin', 'martin', 'fady', 'retadon', 'mario', 'jakob'].map(id => CHARS.find(c => c.id === id));
+      // zehn Figuren im Abstand von 5 Spalten, mittig auf dem Gipfel (Spalte 16 bis 64)
+      const fx = i => 16 + i * 5, one = t >= 112, rise = one ? Math.round((t - 112) * 0.7) : 0;
       // Sterne
       for (const [x, y] of [[5, 9], [12, 13], [70, 10], [76, 14], [8, 16], [73, 8], [3, 12]]) put(x, y, (x + (t >> 2)) % 2 ? '.' : '+', '#6b7562');
       // Kippenberg mit flachem Gipfel; ab Tick 120 löst er sich von oben her in Lichtpunkte auf
@@ -3029,7 +3103,7 @@
           else if ((x + y + t) % 3 === 0) { ch[y][x] = '.'; cl[y][x] = HOT; }
         }
       }
-      // die Sieben sitzen nebeneinander, jede Kippe glüht; am Schluss steigen sie als Licht auf
+      // die Zehn sitzen nebeneinander, jede Kippe glüht; am Schluss steigen sie als Licht auf
       crew.forEach((c, i) => {
         const y = 16 - rise;
         if (y >= 7) {
@@ -3045,7 +3119,8 @@
         }
       });
       // die Namen aus der Story, solange der erste Satz läuft
-      if (t < 30) banner([[21, 'Daniel · Adrian · Mattia · Tomas · Robin · Mario · Jakob', '#d8d8d8']]);
+      // (zwei Zeilen, in eine passen die zehn Namen nicht mehr)
+      if (t < 30) banner([[21, 'Daniel · Adrian · Mattia · Tomas · Robin', '#d8d8d8'], [22, 'Martin · Fady · Retadon · Mario · Jakob', '#d8d8d8']]);
       // der Erfasser steht daneben und zählt
       if (19 - rise >= 7) { put(66, 19 - rise, ' o', one ? '#ffffff' : '#b8c4a6'); put(66, 20 - rise, '/|\\', one ? '#ffffff' : '#b8c4a6'); }
       if (t >= 34 && t < 126)
