@@ -26,6 +26,12 @@
   p.sub { margin: 0 0 16px; color: var(--dim); font-size: 0.85rem; text-align: center; }
   .picker { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; }
   #chars { margin-bottom: 20px; }
+  #ton { margin: -6px 0 14px; align-items: center; }
+  #ton button { font-size: 0.75rem; padding: 3px 10px; }
+  #ton label { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 0.75rem; }
+  #ton input { accent-color: #ffd24a; width: 110px; }
+  #tonhint { color: var(--dim); font-size: 0.75rem; font-style: italic; }
+  #tonhint[hidden] { display: none; }
   #reset { margin-top: 24px; font: inherit; font-size: 0.75rem; background: none; border: 0; color: var(--dim); cursor: pointer; text-decoration: underline; }
   .picker button {
     font: inherit;
@@ -209,6 +215,12 @@
 <body>
   <h1>ASCII-RAUCHERPAUSE</h1>
   <p class="sub">Rauchen, Kippen sammeln, Upgrades kaufen. Garantiert teer- und nikotinfrei.</p>
+  <div id="ton" class="picker" role="group" aria-label="Ton">
+    <button id="tonmusik" type="button"></button>
+    <button id="tonsfx" type="button"></button>
+    <label>Lautstärke <input id="tonvol" type="range" min="0" max="100" step="1"></label>
+    <span id="tonhint">Ton startet mit dem ersten Klick</span>
+  </div>
 
   <div id="brands" class="picker" role="group" aria-label="Marke"></div>
   <div id="chars" class="picker" role="group" aria-label="Charakter"></div>
@@ -269,6 +281,1121 @@
   const CIG_X = 16;              // Spalte, an der die Zigarette beginnt
 
   const EMBER = '#ff8a2a', HOT = '#ffd24a', METAL = '#8fa3b5', WOOD = '#b98a55';
+
+  // ---- Sound & Musik --------------------------------------------------------
+  // Alles wird live im Browser erzeugt (Web Audio API), es gibt keine Sounddateien.
+  // Browser spielen erst nach dem ersten Klick oder Tastendruck Ton ab, bis dahin bleibt alles stumm.
+  // Die snd-Funktionen darf man jederzeit aufrufen: ohne Ton, stumm geschaltet oder beim Nachholen
+  // verpasster Ticks (snd.quiet) passiert einfach nichts.
+  const snd = (() => {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const KEY = 'ascii-raucherpause-ton', MUS_VOL = 0.32;
+    const opt = { sfx: true, music: true, vol: 0.7 };
+    try {
+      const o = JSON.parse(localStorage.getItem(KEY) || '{}');
+      for (const k of ['sfx', 'music']) if (typeof o[k] === 'boolean') opt[k] = o[k];
+      if (typeof o.vol === 'number' && o.vol >= 0 && o.vol <= 1) opt.vol = o.vol;
+    } catch (e) {}
+    const store = () => { try { localStorage.setItem(KEY, JSON.stringify(opt)); } catch (e) {} };
+
+    // quiet: beim Nachholen stumm; stepSec: Dauer eines Animationsschritts in s; energy: 0..1, wie wild es gerade zugeht
+    // ahead: so weit (s) plant die Musik im Voraus
+    const api = { quiet: false, stepSec: TICK / 1000, energy: 0, ahead: 0.3 };
+    let ac = null, out, sfxBus, musBus, musTone, musIn = null, sfxVerb, musVerb, noiseBuf, vinylBuf, distCurve;
+    let gestureAt = -1e9, unlocked = false;
+    const unlockCbs = [];
+    const R = (a, b) => a + Math.random() * (b - a);
+    const pick = a => a[Math.floor(Math.random() * a.length)];
+    const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+    const vol2 = v => 1.3 * v * v;
+    const lastAt = {};
+    // höchstens ein Sound je Schlüssel alle ms Millisekunden
+    const gate = (k, ms) => { const n = performance.now(); if (n - (lastAt[k] ?? -1e9) < ms) return false; lastAt[k] = n; return true; };
+    const live = () => !!ac && ac.state === 'running';
+    const ok = () => live() && opt.sfx && !api.quiet;
+    const T = (dt = 0) => ac.currentTime + 0.01 + dt;
+
+    // ---- Bausteine ----
+    const G = (v = 1) => { const g = ac.createGain(); g.gain.value = v; return g; };
+    const F = (type, f, q = 0.7) => { const n = ac.createBiquadFilter(); n.type = type; n.frequency.value = f; n.Q.value = q; return n; };
+    const link = (...n) => { for (let i = 1; i < n.length; i++) n[i - 1].connect(n[i]); return n[n.length - 1]; };
+    function O(type, f, t, end) {
+      const o = ac.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); o.start(t); o.stop(end); return o;
+    }
+    function N(t, end, buf = noiseBuf) {
+      const s = ac.createBufferSource(); s.buffer = buf; s.loop = true;
+      s.start(t, Math.random() * (buf.duration - 0.2)); s.stop(end); return s;
+    }
+    function shaper() {
+      const s = ac.createWaveShaper();
+      if (!distCurve) {
+        distCurve = new Float32Array(1024);
+        for (let i = 0; i < 1024; i++) distCurve[i] = Math.tanh(6 * (i / 512 - 1)) / Math.tanh(6);
+      }
+      s.curve = distCurve; return s;
+    }
+    // Ausgang einer Stimme (vol, pan, verb = Hallanteil, mus = Musik statt Effekt).
+    // done(quelle): sobald die Quelle verklungen ist, trennt sich die Stimme ab (dann kann der Browser alles wegräumen).
+    function V(t, dur, o = {}) {
+      const g = G(o.vol ?? 1), mus = !!o.mus;
+      let x = g, freed = false;
+      if (o.pan && ac.createStereoPanner) {
+        const p = ac.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, o.pan)); x = link(g, p);
+      }
+      x.connect(mus ? musIn : sfxBus);
+      if (o.verb) link(x, G(o.verb), mus ? musVerb : sfxVerb);
+      g.free = () => { if (freed) return; freed = true; try { x.disconnect(); if (x !== g) g.disconnect(); } catch (e) {} };
+      g.done = src => { src.onended = g.free; return g; };
+      setTimeout(g.free, (t - ac.currentTime + dur + 8) * 1000);   // falls ein Ende-Ereignis ausbleibt
+      return g;
+    }
+    // Hüllkurve: in a s auf v, h s halten, in etwa d s ausklingen
+    function env(p, t, a, h, d, v = 1) {
+      p.setValueAtTime(0, t);
+      p.linearRampToValueAtTime(v, t + a);
+      if (h > 0) p.setValueAtTime(v, t + a + h);
+      p.setTargetAtTime(0, t + a + h, d / 4);
+    }
+    // gefiltertes Rauschen; Lautstärke wird an die Filterbreite angepasst (schmale Filter klingen sonst zu leise)
+    function hiss(t, o) {
+      const { a = 0.005, h = 0, d = 0.1, f = 1000, f2 = f, q = 0.7, type = 'bandpass' } = o;
+      const end = t + a + h + d + 0.05, e = G(0), fl = F(type, f, q);
+      const bw = type === 'bandpass' ? f / q : type === 'lowpass' ? f : Math.max(1000, 22050 - f);
+      if (f2 !== f) { fl.frequency.setValueAtTime(f, t); fl.frequency.exponentialRampToValueAtTime(f2, t + a + h + d * 0.7); }
+      const src = N(t, end);
+      link(src, fl, e, V(t, end - t, { ...o, vol: (o.vol ?? 1) * Math.min(6, Math.sqrt(11025 / bw)) }).done(src));
+      env(e.gain, t, a, h, d);
+    }
+    // Ton: Wellenform type, Tonhöhe f -> f2, Vibrato (vib Hz, vd Hz Tiefe), Tiefpass lp
+    function tone(t, o) {
+      const { type = 'sine', f = 440, f2 = f, a = 0.005, h = 0, d = 0.2 } = o;
+      const len = a + h + d, end = t + len + 0.05, os = O(type, f, t, end), e = G(0);
+      if (f2 !== f) os.frequency.exponentialRampToValueAtTime(f2, t + (o.glide ?? len));
+      if (o.vib) link(O('sine', o.vib, t, end), G(o.vd ?? f * 0.02), os.frequency);
+      if (o.det) os.detune.value = o.det;
+      link(o.lp ? link(os, F('lowpass', o.lp, o.lq ?? 0.7)) : os, e, V(t, end - t, o).done(os));
+      env(e.gain, t, a, h, d);
+    }
+    // Glocke: Grundton plus unharmonische Obertöne
+    function bell(t, f, d, o = {}) {
+      const v = o.vol ?? 1;
+      tone(t, { ...o, f, a: 0.002, d });
+      tone(t, { ...o, f: f * 2.76, a: 0.002, d: d * 0.4, vol: v * 0.3 });
+      tone(t, { ...o, f: f * 5.4, a: 0.001, d: d * 0.18, vol: v * 0.12 });
+    }
+    // Stimme: Sägezahn durch zwei Formantfilter (Vokal fa -> fb), Tonhöhe f -> f2, rough = Rauheit
+    function vox(t, o) {
+      const { f = 140, f2 = f, a = 0.03, h = 0, d = 0.2, fa = [700, 1150], fb = fa, rough = 0 } = o;
+      const len = a + h + d, end = t + len + 0.05, os = O('sawtooth', f, t, end), e = G(0), sum = G(2.5);
+      os.frequency.exponentialRampToValueAtTime(f2, t + len);
+      if (rough) link(O('square', R(23, 37), t, end), G(f * rough * 0.3), os.frequency);
+      fa.forEach((ff, i) => {
+        const fl = F('bandpass', ff, i ? 8 : 5);
+        fl.frequency.setValueAtTime(ff, t); fl.frequency.exponentialRampToValueAtTime(fb[i], t + len);
+        link(os, fl, G(i ? 0.6 : 1), sum);
+      });
+      link(sum, e, V(t, end - t, o).done(os));
+      env(e.gain, t, a, h, d);
+    }
+    // Knistern: viele winzige Knackser hintereinander (rate pro Sekunde)
+    function crackle(t, dur, rate, vol, f = 3000, pan = R(-0.2, 0.2)) {
+      const e = G(0), end = t + dur + 0.05, src = N(t, end);
+      link(src, F('highpass', f, 0.7), e, V(t, dur + 0.05, { vol: vol * 3, pan }).done(src));
+      for (let x = t + Math.random() / rate; x < t + dur; x += R(0.3, 1.7) / rate) {
+        e.gain.setValueAtTime(R(0.2, 1), x); e.gain.setTargetAtTime(0, x + 0.001, R(0.002, 0.007));
+      }
+    }
+    function coins(t, n, span, vol = 0.04) {
+      for (let i = 0; i < n; i++) bell(t + Math.random() * span, R(2800, 5200), R(0.08, 0.2), { vol, pan: R(-0.5, 0.5) });
+    }
+    function gurgle(t, dur, vol) {
+      const end = t + dur, os = O('sine', 200, t, end + 0.05), e = G(0);
+      for (let x = t; x < end; x += R(0.02, 0.05)) os.frequency.setValueAtTime(R(120, 320), x);
+      link(os, e, V(t, dur, { vol }).done(os));
+      env(e.gain, t, 0.02, dur * 0.6, dur * 0.4);
+    }
+    // Blechbläser: zwei leicht verstimmte Sägezähne, der Filter öffnet beim Anblasen
+    function brass(t, m, d, o = {}) {
+      const f = mtof(m), end = t + d + 0.5, e = G(0), fl = F('lowpass', 300, 1.2), top = o.bright || 2600;
+      let os;
+      for (const det of [-7, 7]) { os = O('sawtooth', f, t, end); os.detune.value = det; os.connect(fl); }
+      fl.frequency.setValueAtTime(300, t); fl.frequency.linearRampToValueAtTime(top, t + 0.06);
+      fl.frequency.setTargetAtTime(top * 0.5, t + 0.08, 0.15);
+      link(fl, e, V(t, d + 0.5, o).done(os));
+      env(e.gain, t, 0.03, Math.max(0, d - 0.03), 0.3);
+    }
+    function timp(t, f, vol, mus = false) {
+      tone(t, { f: f * 1.3, f2: f, glide: 0.05, d: 1.1, vol, mus, verb: 0.35 });
+      hiss(t, { type: 'lowpass', f: 400, a: 0.002, d: 0.12, vol: vol * 0.5, mus });
+    }
+    const crash = (t, vol, mus = false) => hiss(t, { type: 'highpass', f: 3800, a: 0.002, d: 1.8, vol, mus, verb: 0.3 });
+    function duck(t, len) {
+      if (!opt.music) return;
+      const p = musBus.gain;
+      p.cancelScheduledValues(t); p.setTargetAtTime(MUS_VOL * 0.35, t, 0.04); p.setTargetAtTime(MUS_VOL, t + len, 0.4);
+    }
+
+    // ---- Rauchen ----
+    // Tiefer Zug: Luft rauscht durch Filter und Lunge, die Glut knistert
+    api.inhale = sec => {
+      if (!ok()) return;
+      const t = T(), d = Math.max(0.08, sec), deep = Math.min(1, d / 0.7), v = 0.55 + 0.45 * deep;
+      if (d > 0.25) tone(t, { f: 700, f2: 380, d: 0.04, vol: 0.05 });          // Lippen am Filter
+      hiss(t, { f: 450, f2: 1300, q: 0.9, a: d * 0.45, h: d * 0.3, d: d * 0.35, vol: 0.4 * v });
+      hiss(t, { type: 'highpass', f: 2600, a: d * 0.5, h: d * 0.3, d: d * 0.25, vol: 0.12 * v });
+      hiss(t, { type: 'lowpass', f: 260, a: d * 0.6, h: d * 0.2, d: d * 0.3, vol: 0.3 * deep });   // tief aus der Brust
+      crackle(t + d * 0.1, d * 0.85, 22, 0.14 * v, 2800);
+    };
+    // Ausatmen: "p" der Lippen, dann ein langer Luftstrom, dessen Klang absinkt.
+    // o: bright (heller), deep (tiefer), voice (Grundton für ein "haaah"), rasp (Röcheln), verb
+    api.exhale = (sec, o = {}) => {
+      if (!ok()) return;
+      const t = T(), d = Math.max(0.1, sec), v = d < 0.3 ? 0.6 : 1;
+      hiss(t, { type: 'lowpass', f: 700, a: 0.003, d: 0.05, vol: 0.45 * v });
+      hiss(t, { f: o.bright ? 2400 : o.deep ? 1100 : 1600, f2: o.deep ? 260 : 420, q: 0.6,
+        a: 0.04, h: d * 0.2, d: d * 0.85, vol: 0.75 * v, pan: 0.1, verb: o.verb ?? 0.05 });
+      hiss(t, { type: 'highpass', f: 3200, a: 0.03, h: d * 0.1, d: d * 0.5, vol: (o.bright ? 0.2 : 0.1) * v });
+      if (o.voice) vox(t + 0.03, { f: o.voice, f2: o.voice * 0.8, a: 0.1, h: d * 0.2, d: d * 0.6,
+        fa: [750, 1200], fb: [600, 1000], vol: 0.12 * v });
+      if (o.rasp) vox(t, { f: 62, f2: 48, a: 0.05, h: d * 0.3, d: d * 0.5, fa: [380, 900], rough: 0.6, vol: 0.3 * v });
+    };
+    api.cough = () => {
+      if (!ok() || !gate('cough', 120)) return;
+      const t = T(), p = R(0.9, 1.15);
+      hiss(t, { f: 900 * p, f2: 380, q: 1, a: 0.004, d: 0.2, vol: 0.8 });
+      hiss(t, { type: 'lowpass', f: 300, a: 0.002, d: 0.08, vol: 0.4 });
+      vox(t, { f: 180 * p, f2: 120, a: 0.006, d: 0.16, fa: [550, 1500], rough: 0.3, vol: 0.5 });
+    };
+    function zclick(t, p) {   // Zippo-Deckel
+      hiss(t, { type: 'highpass', f: 3500, a: 0.001, d: 0.015, vol: 0.5 });
+      bell(t, 2650 * p, 0.12, { vol: 0.06 });
+    }
+    function tamp(t) {        // Pfeife stopfen
+      tone(t, { f: 130, f2: 60, d: 0.09, vol: 0.3 });
+      hiss(t, { type: 'lowpass', f: 900, a: 0.002, d: 0.05, vol: 0.25 });
+    }
+    // Anzünden: 'zippo' (Deckel, Reibrad, Flamme, Deckel zu), 'match' (ratsch, fffft) oder 'pipe' (stopfen, dann Streichholz).
+    // sec = wie lange das Anzünden im Spiel gerade dauert (beim schnellen Rauchen kürzer)
+    api.light = (kind, sec = 1.1) => {
+      if (!ok()) return;
+      const k = Math.min(1, Math.max(0.15, sec / 1.1));
+      let t = T();
+      if (kind === 'pipe') { tamp(t); tamp(t + 0.16 * k); t += 0.35 * k; kind = 'match'; }
+      else hiss(t, { f: 2400, f2: 1400, q: 2, a: 0.03, d: 0.1, vol: 0.12 });   // Kippe aus der Schachtel ziehen
+      t += 0.1 * k;
+      if (kind === 'match') {
+        hiss(t, { f: 1500, f2: 4200, q: 1.3, a: 0.01, h: 0.12 * k, d: 0.08, vol: 0.35 });
+        crackle(t, 0.2 * k, 90, 0.3, 2200);
+        hiss(t + 0.16 * k, { f: 1400, f2: 600, q: 0.6, a: 0.01, h: 0.05, d: 0.35 * k + 0.1, vol: 0.45 });   // fffft
+        crackle(t + 0.18 * k, 0.35 * k, 40, 0.18, 1500);
+      } else {
+        zclick(t, 1);
+        hiss(t + 0.3 * k, { f: 2600, f2: 3800, q: 1.6, a: 0.002, d: 0.07, vol: 0.3 });                     // Reibrad
+        crackle(t + 0.3 * k, 0.07, 160, 0.25, 3000);
+        hiss(t + 0.33 * k, { type: 'lowpass', f: 450, f2: 1100, a: 0.03, h: 0.25 * k, d: 0.3, vol: 0.35 });   // Flamme: fwump
+        zclick(t + 0.85 * k, 0.75);
+      }
+      crackle(t + 0.55 * k, 0.3 * k + 0.05, 45, 0.16, 2500);   // die Kippe fängt Feuer
+    };
+    api.stubOut = () => {    // ausdrücken: tsss
+      if (!ok()) return;
+      const t = T();
+      hiss(t, { type: 'highpass', f: 5000, f2: 2500, a: 0.01, d: 0.45, vol: 0.18 });
+      crackle(t, 0.15, 100, 0.15, 1500);
+    };
+    api.flick = () => {      // Stummel wegschnippen
+      if (!ok()) return;
+      const t = T();
+      tone(t, { type: 'triangle', f: 1900, f2: 900, d: 0.03, vol: 0.25 });
+      hiss(t, { type: 'highpass', f: 4000, a: 0.001, d: 0.02, vol: 0.5 });
+    };
+    api.land = () => {       // Stummel landet auf dem Berg
+      if (!ok() || !gate('land', 350)) return;
+      const t = T();
+      hiss(t, { type: 'lowpass', f: 1000, a: 0.002, d: 0.04, vol: 0.3, pan: 0.4 });
+      tone(t, { f: 240, f2: 130, d: 0.05, vol: 0.12, pan: 0.4 });
+    };
+    api.plink = () => {      // Kippen gutgeschrieben
+      if (!ok() || !gate('plink', 150)) return;
+      const t = T();
+      bell(t, 1760, 0.25, { vol: 0.07, pan: 0.2 }); bell(t + 0.07, 2349, 0.35, { vol: 0.06, pan: 0.2 });
+    };
+    api.roar = () => {       // Rauch-Löwe brüllt
+      if (!ok() || !gate('roar', 800)) return;
+      const t = T(), end = t + 1.4, os = O('sawtooth', 95, t, end), ag = G(0.6), e = G(0);
+      os.frequency.linearRampToValueAtTime(140, t + 0.25); os.frequency.exponentialRampToValueAtTime(70, t + 1.2);
+      link(O('sine', 32, t, end), G(0.5), ag.gain);
+      link(os, ag, shaper(), F('lowpass', 1400, 1), e, V(t, 1.4, { vol: 0.3, verb: 0.3 }).done(os));
+      env(e.gain, t, 0.08, 0.5, 0.6);
+      hiss(t, { f: 700, f2: 400, q: 0.8, a: 0.06, h: 0.4, d: 0.6, vol: 0.35, verb: 0.3 });
+    };
+    api.boom = () => {       // Feuerwerksrakete zerplatzt
+      if (!ok() || !gate('boom', 120)) return;
+      const t = T(), p = R(-0.6, 0.6);
+      hiss(t, { type: 'lowpass', f: 3000, f2: 180, a: 0.002, d: 0.7, vol: 0.4, pan: p, verb: 0.35 });
+      tone(t, { f: 90, f2: 35, d: 0.35, vol: 0.3 });
+      crackle(t + 0.12, 0.7, 35, 0.22, 3000, p);
+    };
+    function thunder(t) {
+      hiss(t, { type: 'highpass', f: 2500, a: 0.001, d: 0.1, vol: 0.4, verb: 0.3 });
+      hiss(t + 0.05, { type: 'lowpass', f: 300, f2: 90, a: 0.05, h: 0.2, d: 1.4, vol: 0.5, verb: 0.3 });
+    }
+    function rocket(t, sec) {
+      tone(t, { f: 700, f2: 2600, a: 0.02, h: sec * 0.8, d: 0.1, vol: 0.04, vib: 9, vd: 30 });
+      hiss(t, { f: 2000, q: 1, a: 0.02, h: sec * 0.7, d: 0.1, vol: 0.12 });
+    }
+    // Sondereffekte beim Ausatmen je nach Sorte (k = Tick im Ausatmen, sec = Dauer des ganzen Ausatmens)
+    api.exFx = (kind, k, sec) => {
+      if (!ok()) return;
+      const t = T(), st = api.stepSec;
+      switch (kind) {
+        case 'rings':      // jeder Ring ein kleines "puh"
+          if (k === 1 || k === 5 || k === 9) {
+            hiss(t, { type: 'lowpass', f: 700, a: 0.004, d: 0.12, vol: 0.45 });
+            tone(t, { f: 180, f2: 110, d: 0.08, vol: 0.12 });
+          }
+          break;
+        case 'frost':
+          if (k % 2 === 0 && gate('frost', 120)) bell(t, R(3000, 6000), 0.2, { vol: 0.08, pan: R(0, 0.7), verb: 0.3 });
+          break;
+        case 'stars':
+          if (gate('star', 90)) bell(t, R(2400, 5200), 0.35, { vol: 0.09, pan: R(-0.2, 0.8), verb: 0.4 });
+          break;
+        case 'hearts':     // Harfe aufwärts
+          if (k === 1) [72, 76, 79, 84, 88, 91].forEach((m, i) => tone(t + i * 0.07, { type: 'triangle', f: mtof(m), d: 0.6, vol: 0.08, verb: 0.4, pan: 0.3 }));
+          break;
+        case 'rainbow':    // Fwuuusch und sechs Töne, einer je Farbe
+          if (k === 1) {
+            hiss(t, { f: 500, f2: 3000, q: 0.8, a: 0.3, d: 0.6, vol: 0.18, pan: 0.4 });
+            [72, 74, 76, 79, 81, 84].forEach((m, i) => bell(t + i * 0.08, mtof(m), 0.6, { vol: 0.045, pan: i * 0.12, verb: 0.35 }));
+          }
+          break;
+        case 'skulls':     // unheimliches Brummen
+          if (k === 1) for (const f of [55, 58.3]) tone(t, { f, a: 0.3, h: sec * 0.5, d: 0.8, vol: 0.1, verb: 0.4 });
+          break;
+        case 'storm':
+          if (k > 3 && k % 3 === 0 && gate('thunder', 250)) thunder(t);
+          break;
+        case 'bubbles':
+          if (gate('blub', 70)) tone(t, { f: R(300, 500), f2: R(900, 1400), d: 0.05, vol: 0.2, pan: R(0, 0.6) });
+          break;
+        case 'notes':      // Vibraphon, Blues-Tonleiter
+          if (k % 2 === 1) bell(t, mtof(pick([60, 63, 65, 66, 67, 70, 72, 75])), 0.6, { vol: 0.06, pan: 0.3, verb: 0.3 });
+          break;
+        case 'fireworks':
+          if (k === 1 || k === 5 || k === 9) rocket(t, 15 * st);
+          break;
+        case 'ghosts':     // huuuuuh
+          if (k === 1 || k === 6) {
+            const f = k === 1 ? 330 : 440;
+            tone(t, { f, f2: f * 0.62, a: 0.2, h: 0.4, d: 0.8, vib: 5, vd: f * 0.03, vol: 0.06, verb: 0.6 });
+            hiss(t, { f: 700, q: 2, a: 0.2, h: 0.3, d: 0.7, vol: 0.12, verb: 0.5 });
+          }
+          break;
+        case 'lion':       // kleines Knurren beim Entstehen, das Brüllen kommt später (api.roar)
+          if (k === 1) tone(t, { type: 'sawtooth', f: 70, vib: 25, vd: 8, lp: 400, a: 0.1, h: 0.2, d: 0.3, vol: 0.1 });
+          break;
+        case 'matrix':
+          if (k === 1) tone(t, { type: 'sawtooth', f: 2000, f2: 150, lp: 2500, a: 0.01, d: sec, vol: 0.04 });
+          if (gate('bit', 70)) tone(t, { type: 'square', f: pick([880, 1175, 1320, 1760, 2093]), d: 0.03, vol: 0.05, pan: R(-0.3, 0.6) });
+          break;
+        case 'fire':       // Flammenwerfer
+          if (k === 1) {
+            hiss(t, { type: 'lowpass', f: 900, a: 0.05, h: sec * 0.7, d: 0.4, vol: 0.3 });
+            crackle(t, sec, 30, 0.3, 1500);
+            tone(t, { type: 'sawtooth', f: 55, lp: 200, a: 0.05, h: sec * 0.7, d: 0.4, vol: 0.1 });
+          }
+          break;
+        case 'galaxy':     // wuuuooom und funkelnde Sterne
+          if (k === 1) {
+            tone(t, { f: 55, f2: 82, a: 0.4, h: sec * 0.6, d: 1, vol: 0.18, verb: 0.5 });
+            tone(t, { f: 110, f2: 165, a: 0.4, h: sec * 0.6, d: 1, vol: 0.06, det: 7, verb: 0.5 });
+          }
+          if (k % 3 === 0) bell(t, R(2000, 5000), 0.5, { vol: 0.025, pan: R(-0.5, 0.8), verb: 0.6 });
+          break;
+      }
+    };
+    // Ausatem-Klang je Sorte (rings: nur die einzelnen "puh")
+    api.EXHALE = { frost: { bright: 1, voice: 130 }, cloud: { deep: 1 }, hearts: { voice: 160 }, skulls: { deep: 1, rasp: 1 },
+      ghosts: { verb: 0.4 }, galaxy: { deep: 1, verb: 0.3 }, fire: { deep: 1 }, rainbow: { bright: 1 }, stars: { bright: 1 } };
+
+    // ---- Belohnungen & Freischaltungen ----
+    function magic(t) {
+      [72, 76, 79, 83, 86, 88, 91, 95, 98].forEach((m, i) => bell(t + i * 0.045, mtof(m), 0.5, { vol: 0.08, pan: (i - 4) * 0.1, verb: 0.4 }));
+      tone(t, { f: 500, f2: 2000, a: 0.1, d: 0.5, vol: 0.03, verb: 0.4 });
+    }
+    api.fanfare = kind => {
+      if (!ok()) return;
+      const t = T();
+      duck(t, kind === 'legend' ? 2.5 : 1.2);
+      if (kind === 'char') {
+        [72, 76, 79, 84].forEach((m, i) => tone(t + i * 0.09, { type: 'square', f: mtof(m), h: i === 3 ? 0.3 : 0.05, d: 0.25, lp: 3000, vol: 0.06, verb: 0.2 }));
+        tone(t, { type: 'triangle', f: mtof(48), h: 0.4, d: 0.3, vol: 0.15 });
+      } else if (kind === 'brand') {
+        [79, 83, 86, 91].forEach((m, i) => bell(t + i * 0.08, mtof(m), 0.9, { vol: 0.11, verb: 0.35, pan: (i - 1.5) * 0.2 }));
+      } else if (kind === 'buff') {
+        magic(t);
+      } else if (kind === 'legend') {
+        [48, 55, 60, 64, 67, 72].forEach(m => brass(t, m, 1.4, { vol: 0.05, verb: 0.3 }));
+        timp(t, 65, 0.4); timp(t + 0.25, 87, 0.35); crash(t, 0.15);
+        [84, 88, 91, 96].forEach((m, i) => bell(t + 0.3 + i * 0.1, mtof(m), 1, { vol: 0.05, verb: 0.4 }));
+      }
+    };
+    api.buy = n => {         // Registrierkasse
+      if (!ok() || !gate('buy', 60)) return;
+      const t = T();
+      hiss(t, { f: 1500, q: 0.9, a: 0.002, d: 0.06, vol: 0.3 });
+      bell(t + 0.03, 2093, 0.5, { vol: 0.09 }); bell(t + 0.1, 2637, 0.7, { vol: 0.09 });
+      coins(t + 0.05, Math.min(12, 2 + Math.round(Math.log2(n || 1) * 2)), 0.25);
+    };
+    api.buff = () => {
+      if (!ok()) return;
+      const t = T(); magic(t);
+      hiss(t, { f: 600, f2: 3000, q: 0.7, a: 0.25, d: 0.4, vol: 0.12 });
+    };
+    api.coin = (big = false) => {
+      if (!ok() || !gate('coin', 40)) return;
+      const t = T();
+      tone(t, { type: 'square', f: 988, h: 0.05, d: 0.02, lp: 4000, vol: 0.05 });
+      tone(t + 0.07, { type: 'square', f: 1319, h: 0.12, d: 0.25, lp: 4000, vol: 0.05 });
+      if (big) coins(t + 0.05, 10, 0.5);
+    };
+    api.sparkle = () => {    // Shiny-Kippe glitzert
+      if (!ok()) return;
+      const t = T();
+      for (let i = 0; i < 7; i++) bell(t + i * R(0.07, 0.15), R(2500, 5000), 0.4, { vol: 0.055, pan: R(0.2, 0.9), verb: 0.5 });
+    };
+    api.shiny = () => {
+      if (!ok()) return;
+      const t = T();
+      [84, 86, 88, 91, 93, 96, 98, 100].forEach((m, i) => bell(t + i * 0.035, mtof(m), 0.5, { vol: 0.06, verb: 0.4, pan: 0.5 }));
+      hiss(t, { f: 1500, f2: 6000, a: 0.15, d: 0.3, vol: 0.1 });
+      coins(t + 0.2, 8, 0.5);
+    };
+    api.alien = () => {
+      if (!ok()) return;
+      const t = T();
+      tone(t, { f: 400, f2: 1600, d: 0.16, vib: 30, vd: 40, vol: 0.1 });
+      tone(t + 0.12, { f: 600, f2: 2000, d: 0.2, vib: 30, vd: 50, vol: 0.06, verb: 0.3 });
+    };
+    api.ufoDrop = () => {
+      if (!ok() || !gate('ufodrop', 300)) return;
+      tone(T(), { f: 1500, f2: 500, d: 0.35, vol: 0.07, verb: 0.3 });
+    };
+
+    // ---- Besucher ----
+    api.visitor = (id, dir = -1) => {
+      if (!ok()) return;
+      const t = T(), side = -dir * 0.7;   // kommt von dieser Seite
+      switch (id) {
+        case 'automat':    // klimper
+          tone(t, { f: 90, f2: 60, d: 0.12, vol: 0.25, pan: side });
+          coins(t + 0.05, 9, 0.6, 0.055);
+          break;
+        case 'hoernchen':
+          for (let i = 0; i < 5; i++) tone(t + i * 0.08 + (i > 2 ? 0.2 : 0), { f: 2600, f2: 4200, d: 0.035, vol: 0.1, pan: side });
+          break;
+        case 'auto': {     // tuut tuut, dann rauscht es vorbei
+          for (const dt of [0, 0.28]) for (const f of [349, 440])
+            tone(t + dt, { type: 'square', f, a: 0.01, h: 0.13, d: 0.06, lp: 1600, vol: 0.04, pan: side });
+          const end = t + 2.4, os = O('sawtooth', 60, t, end), e = G(0), x = V(t, 2.4, { vol: 0.12 }).done(os);
+          os.frequency.linearRampToValueAtTime(95, t + 1); os.frequency.linearRampToValueAtTime(55, t + 2.2);
+          if (ac.createStereoPanner) {
+            const p = ac.createStereoPanner(); p.pan.setValueAtTime(side, t); p.pan.linearRampToValueAtTime(-side, t + 2.2);
+            link(os, F('lowpass', 500), e, p, x);
+          } else link(os, F('lowpass', 500), e, x);
+          env(e.gain, t, 1, 0.1, 1.2);
+          hiss(t + 0.3, { type: 'lowpass', f: 250, f2: 900, a: 0.7, d: 1.2, vol: 0.15 });
+          break;
+        }
+        case 'taube':      // gurr gurr, Flügelschlagen
+          for (const dt of [0, 0.55]) tone(t + dt, { f: 430, f2: 360, a: 0.05, h: 0.15, d: 0.2, vib: 28, vd: 25, vol: 0.06, pan: side });
+          for (let i = 0; i < 6; i++) hiss(t + 1.1 + i * 0.07, { type: 'lowpass', f: 1800, a: 0.002, d: 0.03, vol: 0.15, pan: side });
+          break;
+        case 'aliens':     // Theremin
+          tone(t, { f: 520, f2: 880, glide: 1.0, a: 0.3, h: 1.2, d: 0.5, vib: 6, vd: 18, vol: 0.05, verb: 0.45 });
+          break;
+        case 'malboro':    // Western-Gitarre
+          [40, 47, 52, 55, 52, 59].forEach((m, i) => tone(t + i * 0.14, { type: 'sawtooth', f: mtof(m) * 0.985, f2: mtof(m), glide: 0.05,
+            lp: 1800, a: 0.003, d: 0.7, vol: 0.09, verb: 0.4, pan: side * 0.5 }));
+          break;
+        case 'merz':
+          coins(t, 12, 0.7, 0.04); bell(t + 0.2, 1568, 0.6, { vol: 0.05 });
+          break;
+      }
+    };
+    api.hooves = () => {
+      if (!ok() || !gate('hooves', 250)) return;
+      const t = T();
+      for (const dt of [0, 0.08, 0.17]) {
+        tone(t + dt, { f: 300, f2: 180, d: 0.04, vol: 0.08 });
+        hiss(t + dt, { f: 1200, q: 2, a: 0.001, d: 0.02, vol: 0.15 });
+      }
+    };
+    api.whinny = () => {     // *WIEHER!*
+      if (!ok()) return;
+      const t = T();
+      tone(t, { type: 'sawtooth', f: 950, f2: 480, vib: 13, vd: 90, lp: 2500, a: 0.05, h: 0.3, d: 0.6, vol: 0.07, verb: 0.3 });
+      hiss(t, { f: 1500, q: 1, a: 0.05, h: 0.3, d: 0.5, vol: 0.12 });
+      hiss(t + 1.0, { type: 'lowpass', f: 800, a: 0.01, d: 0.2, vol: 0.3 });   // Schnauben
+    };
+    api.footstep = () => {
+      if (!ok() || !gate('step', 200)) return;
+      const t = T();
+      tone(t, { f: 120, f2: 70, d: 0.05, vol: 0.22, pan: 0.3 });
+      hiss(t, { type: 'lowpass', f: 700, a: 0.002, d: 0.03, vol: 0.12, pan: 0.3 });
+    };
+    api.tsk = () => {        // Arzt: tz tz tz
+      if (!ok()) return;
+      const t = T();
+      for (let i = 0; i < 3; i++) {
+        hiss(t + i * 0.22, { f: 4800, q: 2.5, a: 0.001, d: 0.035, vol: 0.3, pan: 0.2 });
+        tone(t + i * 0.22, { f: 1900, d: 0.02, vol: 0.03 });
+      }
+    };
+    api.puke = () => {       // *würg* ... *KOTZ*
+      if (!ok()) return;
+      const t = T();
+      for (const dt of [0, 0.55]) {
+        vox(t + dt, { f: 95, f2: 70, a: 0.04, h: 0.12, d: 0.25, fa: [450, 1000], rough: 0.6, vol: 0.35 });
+        hiss(t + dt, { f: 500, q: 1, a: 0.03, h: 0.1, d: 0.2, vol: 0.25 });
+      }
+      const s = t + 1.15;
+      vox(s, { f: 110, f2: 60, a: 0.01, h: 0.2, d: 0.4, fa: [400, 800], rough: 0.8, vol: 0.4 });
+      hiss(s, { type: 'lowpass', f: 1400, f2: 250, a: 0.01, h: 0.6, d: 0.9, vol: 0.45 });
+      gurgle(s, 1.4, 0.12);
+      for (let i = 0; i < 6; i++) {
+        const x = s + 0.5 + i * R(0.2, 0.35);
+        tone(x, { f: R(260, 380), f2: 120, d: 0.06, vol: 0.06, pan: 0.2 });
+        hiss(x, { type: 'lowpass', f: 900, a: 0.002, d: 0.04, vol: 0.15, pan: 0.2 });
+      }
+    };
+    // kleine Einlagen der Figur (k = Tick der Einlage)
+    api.gag = (id, k) => {
+      if (!ok()) return;
+      const t = T();
+      if (id === 'wink' && k === 14) { bell(t, 2637, 0.4, { vol: 0.05 }); bell(t + 0.06, 3520, 0.5, { vol: 0.04, verb: 0.3 }); }
+      if (id === 'beer') {
+        if (k === 8) hiss(t, { f: 500, f2: 2000, q: 1, a: 0.15, d: 0.3, vol: 0.15, pan: 0.3 });
+        if (k === 35) {
+          hiss(t, { type: 'highpass', f: 3000, a: 0.001, d: 0.25, vol: 0.35, pan: 0.4 });
+          for (let i = 0; i < 12; i++) bell(t + Math.random() * 0.3, R(2500, 7000), R(0.05, 0.2), { vol: 0.04, pan: R(0.1, 0.7) });
+        }
+      }
+      if (id === 'yawn' && k === 0) {
+        vox(t, { f: 200, f2: 130, a: 0.5, h: 0.8, d: 0.9, fa: [600, 1000], fb: [450, 850], vol: 0.18 });
+        hiss(t, { f: 900, q: 0.7, a: 0.5, h: 0.6, d: 0.9, vol: 0.12 });
+      }
+      if (id === 'sneeze') {
+        if (k === 2 || k === 9) {
+          const p = k === 2 ? 1 : 1.25;
+          vox(t, { f: 300 * p, f2: 360 * p, a: 0.1, h: 0.15, d: 0.15, fa: [800, 1300], vol: 0.12 });
+          hiss(t, { f: 700, f2: 1200, a: 0.15, d: 0.2, vol: 0.18 });
+        }
+        if (k === 18) {
+          hiss(t, { f: 4000, q: 0.8, a: 0.004, h: 0.05, d: 0.25, vol: 0.5 });
+          vox(t, { f: 420, f2: 280, a: 0.005, d: 0.15, fa: [350, 2200], vol: 0.2 });
+          hiss(t, { type: 'lowpass', f: 600, a: 0.002, d: 0.06, vol: 0.4 });
+        }
+      }
+      if (id === 'whistle' && k === 0) {
+        let x = t;
+        for (const [m, l] of [[79, 0.25], [84, 0.25], [88, 0.4], [86, 0.2], [84, 0.2], [81, 0.4], [83, 0.25], [79, 0.6]]) {
+          tone(x, { f: mtof(m), a: 0.03, h: l * 0.7, d: 0.1, vib: 5.5, vd: mtof(m) * 0.012, vol: 0.06, verb: 0.25 });
+          x += l;
+        }
+        hiss(t, { f: 2500, q: 1, a: 0.1, h: x - t - 0.2, d: 0.1, vol: 0.04 });
+      }
+      if (id === 'kiss' && k === 8) {
+        hiss(t, { type: 'lowpass', f: 900, a: 0.001, d: 0.03, vol: 0.4 });
+        tone(t, { f: 500, f2: 1000, a: 0.01, d: 0.08, vol: 0.06 });
+        bell(t + 0.1, 1568, 0.4, { vol: 0.04, verb: 0.3 });
+      }
+    };
+    // Slotmachine: 'tick' (Walzen drehen), 'stop', 'pair', 'triple', 'jackpot'
+    api.slot = kind => {
+      if (!ok()) return;
+      const t = T();
+      if (kind === 'tick') tone(t, { type: 'square', f: R(1100, 1500), d: 0.012, vol: 0.06, pan: -0.3 });
+      if (kind === 'stop') tone(t, { f: 170, f2: 90, d: 0.06, vol: 0.1, pan: -0.3 });
+      if (kind === 'pair') { bell(t, 1319, 0.4, { vol: 0.04 }); bell(t + 0.08, 1760, 0.5, { vol: 0.04 }); }
+      if (kind === 'triple') {
+        [76, 79, 84, 88].forEach((m, i) => tone(t + i * 0.08, { type: 'square', f: mtof(m), h: 0.05, d: 0.2, lp: 3500, vol: 0.05 }));
+        coins(t + 0.2, 10, 0.5);
+      }
+      if (kind === 'jackpot') {
+        duck(t, 2);
+        [72, 76, 79, 84, 88, 91, 96].forEach((m, i) => tone(t + i * 0.07, { type: 'square', f: mtof(m), h: 0.05, d: 0.3, lp: 4000, vol: 0.05, verb: 0.2 }));
+        coins(t + 0.3, 30, 1.4, 0.05);
+        bell(t + 0.5, 2093, 1.2, { vol: 0.06, verb: 0.4 });
+      }
+    };
+    // Bosskampf: 'warn' (n = Sekunden bis zum Boss), 'start', 'gift' (Helmut), 'hit', 'win', 'flee', 'giftEnd'
+    api.boss = (kind, n = 10) => {
+      if (!ok()) return;
+      const t = T();
+      if (kind === 'warn') {
+        const f = n <= 3 ? 1175 : 880;
+        tone(t, { type: 'square', f, d: 0.06, lp: 3000, vol: 0.08 });
+        if (n <= 3) tone(t + 0.12, { type: 'square', f, d: 0.06, lp: 3000, vol: 0.08 });
+      }
+      if (kind === 'start') {
+        duck(t, 1.5);
+        [36, 43, 48, 51, 55].forEach(m => brass(t, m, 1.0, { vol: 0.06, bright: 1800, verb: 0.3 }));
+        timp(t, 55, 0.5); timp(t + 0.3, 49, 0.45); crash(t, 0.12);
+      }
+      if (kind === 'gift') {
+        duck(t, 2);
+        [[60, 0, 0.15], [64, 0.18, 0.15], [67, 0.36, 0.15], [72, 0.54, 0.8]].forEach(([m, dt, l]) => {
+          brass(t + dt, m, l, { vol: 0.07, verb: 0.3 }); brass(t + dt, m - 12, l, { vol: 0.04 });
+        });
+        for (let i = 0; i < 8; i++) hiss(t + i * 0.06, { f: 1900, q: 0.6, a: 0.001, d: 0.08, vol: 0.06 + i * 0.01 });
+      }
+      if (kind === 'hit') {
+        if (!gate('hit', 30)) return;
+        const p = R(0.85, 1.2);
+        tone(t, { f: 170 * p, f2: 55, d: 0.12, vol: 0.35 });
+        hiss(t, { type: 'lowpass', f: 2500, f2: 400, a: 0.001, d: 0.07, vol: 0.35, pan: R(-0.3, 0.3) });
+      }
+      if (kind === 'win') {
+        duck(t, 2.5);
+        hiss(t, { type: 'lowpass', f: 1500, f2: 100, a: 0.002, d: 1.6, vol: 0.55, verb: 0.3 });
+        tone(t, { f: 60, f2: 30, d: 0.8, vol: 0.4 });
+        crackle(t + 0.1, 1, 40, 0.2, 2000);
+        [[72, 0.5], [76, 0.62], [79, 0.74], [84, 0.86]].forEach(([m, dt]) =>
+          tone(t + dt, { type: 'square', f: mtof(m), h: m === 84 ? 0.5 : 0.06, d: 0.3, lp: 3500, vol: 0.06, verb: 0.25 }));
+        tone(t + 0.86, { type: 'triangle', f: mtof(48), h: 0.5, d: 0.4, vol: 0.15 });
+      }
+      if (kind === 'flee') {     // wah wah wah waaah
+        [[55, 0, 0.38], [54, 0.42, 0.38], [53, 0.84, 0.38], [52, 1.26, 1.1]].forEach(([m, dt, l]) => {
+          const x = t + dt, f = mtof(m), end = x + l + 0.3, os = O('sawtooth', f, x, end), fl = F('lowpass', 400, 4), e = G(0);
+          fl.frequency.setValueAtTime(400, x); fl.frequency.linearRampToValueAtTime(1400, x + 0.12); fl.frequency.linearRampToValueAtTime(600, x + l);
+          if (l > 1) link(O('sine', 5, x, end), G(f * 0.02), os.frequency);
+          link(os, fl, e, V(x, l + 0.3, { vol: 0.1, verb: 0.2 }).done(os));
+          env(e.gain, x, 0.03, l - 0.1, 0.25);
+        });
+      }
+      if (kind === 'giftEnd') [72, 79, 84].forEach((m, i) => brass(t + i * 0.15, m, i === 2 ? 0.6 : 0.12, { vol: 0.05, verb: 0.3 }));
+    };
+    api.story = () => {
+      if (!ok()) return;
+      const t = T();
+      hiss(t, { f: 3000, f2: 1500, q: 0.8, a: 0.1, d: 0.15, vol: 0.15 });
+      [76, 81, 84, 88].forEach((m, i) => bell(t + 0.15 + i * 0.06, mtof(m), 1.2, { vol: 0.045, verb: 0.45 }));
+    };
+    api.saiyan = () => {     // *KAAAAH!*
+      if (!ok()) return;
+      const t = T(), end = t + 1.8, fl = F('lowpass', 400, 2), e = G(0);
+      duck(t, 2);
+      let os;
+      for (const m of [45, 52, 57]) {
+        os = O('sawtooth', mtof(m), t, end); os.frequency.exponentialRampToValueAtTime(mtof(m + 12), t + 1.3); os.connect(fl);
+      }
+      fl.frequency.setValueAtTime(400, t); fl.frequency.exponentialRampToValueAtTime(3500, t + 1.3);
+      link(fl, shaper(), e, V(t, 1.8, { vol: 0.12, verb: 0.3 }).done(os));
+      env(e.gain, t, 0.3, 1.0, 0.5);
+      hiss(t, { f: 400, f2: 1800, q: 0.9, a: 0.4, h: 0.8, d: 0.5, vol: 0.35 });
+      crash(t + 1.3, 0.2);
+      bell(t + 1.3, 1760, 1.5, { vol: 0.06, verb: 0.5 });
+    };
+    api.prestige = () => {   // Gong
+      if (!ok()) return;
+      const t = T();
+      duck(t, 3);
+      [1, 2.42, 3.15, 4.6, 5.9].forEach((r, i) => tone(t, { f: 98 * r, a: 0.004, d: 4 / (1 + i * 0.4), vol: 0.1 / (1 + i * 0.6), verb: 0.6 }));
+      [60, 64, 67, 72].forEach(m => tone(t + 0.2, { type: 'triangle', f: mtof(m), a: 0.8, h: 0.6, d: 1.5, vol: 0.03, verb: 0.6 }));
+    };
+    // Bedienung: 'tick', 'select', 'pack' (Schachtel klappt), 'fold' (Ordner)
+    api.ui = kind => {
+      if (!ok() || !gate('ui', 30)) return;
+      const t = T();
+      if (kind === 'tick') tone(t, { type: 'triangle', f: 1500, d: 0.02, vol: 0.12 });
+      if (kind === 'select') tone(t, { type: 'triangle', f: 660, f2: 990, d: 0.06, vol: 0.1 });
+      if (kind === 'pack') {
+        tone(t, { f: 260, f2: 140, d: 0.05, vol: 0.12 });
+        hiss(t, { type: 'lowpass', f: 1500, a: 0.001, d: 0.03, vol: 0.2 });
+      }
+      if (kind === 'fold') hiss(t, { f: 2000, f2: 800, q: 0.8, a: 0.03, d: 0.1, vol: 0.1 });
+    };
+    api.newPack = () => {    // Folie knistert, Deckel auf
+      if (!ok()) return;
+      const t = T();
+      crackle(t, 0.4, 70, 0.22, 2500);
+      hiss(t, { f: 5000, q: 0.6, a: 0.05, h: 0.2, d: 0.1, vol: 0.08 });
+      tone(t + 0.42, { f: 260, f2: 140, d: 0.05, vol: 0.12 });
+    };
+    api.turbo = n => {       // schneller ziehen: kurzes Paffen, wird mit dem Tempo höher
+      if (!ok() || !gate('turbo', 25)) return;
+      const t = T();
+      hiss(t, { f: 800 + n * 80, q: 1.5, a: 0.002, d: 0.05, vol: 0.22 });
+      tone(t, { type: 'triangle', f: 300 + n * 35, d: 0.03, vol: 0.035 });
+    };
+    api.fireAmb = () => {    // Moods: der Boden brennt
+      if (!ok() || !gate('fireamb', 380)) return;
+      const t = T();
+      crackle(t, 0.4, 25, 0.1, 1800, R(-0.6, 0.6));
+      hiss(t, { type: 'lowpass', f: 300, a: 0.1, h: 0.2, d: 0.2, vol: 0.06 });
+    };
+
+    // ---- Cutscenes ----
+    api.type = () => {       // Schreibmaschine der Untertitel
+      if (!ok() || !gate('type', 60)) return;
+      const t = T();
+      tone(t, { type: 'square', f: R(1800, 2200), d: 0.008, lp: 4000, vol: 0.03 });
+      hiss(t, { type: 'highpass', f: 3000, a: 0.001, d: 0.012, vol: 0.12 });
+    };
+    api.lightUp = () => {    // alles wird Licht
+      if (!ok()) return;
+      const t = T();
+      [84, 88, 91, 96].forEach(m => tone(t, { f: mtof(m), a: 1.2, h: 0.5, d: 1.5, vol: 0.035, det: R(-6, 6), verb: 0.6 }));
+      for (let i = 0; i < 10; i++) bell(t + R(0.2, 2), R(2000, 5000), 0.6, { vol: 0.025, pan: R(-0.8, 0.8), verb: 0.6 });
+    };
+    function applause(t, dur, vol) {
+      crackle(t, dur, 140, vol, 1200, -0.3); crackle(t, dur, 140, vol, 1200, 0.3);
+      hiss(t, { f: 2000, q: 0.5, a: 0.3, h: dur - 0.8, d: 0.5, vol: vol * 0.5 });
+    }
+    // Geräusche zu Untertiteln: wer *klick* schreibt, bekommt *klick*
+    const CAPS = [
+      [/\*klapp\*/, () => api.ui('pack')],
+      [/\*klick\*/, () => api.light('zippo')],
+      [/\*fffft\*/, t => { crackle(t, 0.5, 45, 0.2, 2000); hiss(t, { f: 1400, f2: 700, q: 0.6, a: 0.02, h: 0.1, d: 0.4, vol: 0.4 }); }],
+      [/\*zieht\*/, () => api.inhale(1.1)],
+      [/\*pfff/, () => api.exhale(1.6)],
+      [/quiiietsch/, t => tone(t, { type: 'sawtooth', f: 160, f2: 260, vib: 23, vd: 40, lp: 2000, a: 0.1, h: 0.8, d: 0.3, vol: 0.06 })],
+      [/keuch/, t => { for (let i = 0; i < 4; i++) hiss(t + i * 0.32, { f: i % 2 ? 700 : 1000, q: 0.8, a: 0.06, d: 0.18, vol: 0.25 }); }],
+      [/\*grrr/, t => { tone(t, { type: 'sawtooth', f: 55, vib: 9, vd: 6, lp: 400, a: 0.3, h: 1.2, d: 0.6, vol: 0.15 });
+        hiss(t, { type: 'lowpass', f: 150, a: 0.5, h: 1, d: 0.6, vol: 0.4 }); }],
+      [/KAAAA/, () => api.saiyan()],
+      [/klimper/, t => coins(t, 16, 0.9, 0.05)],
+      [/blubb/i, t => [0, 0.35, 0.7].forEach((dt, i) => tone(t + dt, { f: 200 - i * 40, f2: 600, d: 0.08 + i * 0.04, vol: 0.12 + i * 0.08 }))],
+      [/brrr/i, t => { tone(t, { type: 'sawtooth', f: 50, f2: 180, lp: 900, a: 0.1, h: 1.2, d: 0.4, vol: 0.12 });
+        hiss(t, { type: 'lowpass', f: 300, f2: 1200, a: 0.2, h: 1, d: 0.4, vol: 0.2 }); }],
+      [/schnipp/, () => api.flick()],
+      [/KOTZ|kotzt/, () => api.puke()],
+      [/Akku/, t => [1200, 1000, 800].forEach((f, i) => tone(t + i * 0.45, { type: 'square', f, d: 0.08, lp: 3000, vol: 0.04 }))],
+      [/Raumschiff/, t => { tone(t, { type: 'sawtooth', f: 80, f2: 600, lp: 1500, a: 0.3, h: 1.4, d: 0.5, vol: 0.08 });
+        hiss(t, { f: 400, f2: 3000, q: 0.7, a: 0.4, h: 1.2, d: 0.5, vol: 0.3, verb: 0.3 }); }],
+      [/Gipfel!/, () => api.fanfare('char')],
+      [/Aua/, t => { tone(t, { f: 400, f2: 150, d: 0.25, vol: 0.2 }); bell(t, 900, 0.3, { vol: 0.06 }); }],
+      [/wankt/, t => tone(t, { f: 220, vib: 4, vd: 30, a: 0.05, h: 0.4, d: 0.4, vol: 0.06 })],
+      [/raucht mit/, t => applause(t, 3, 0.18)],
+      [/Man hört nicht einfach auf/, t => applause(t, 3.5, 0.18)]
+    ];
+    api.caption = text => {
+      if (!ok()) return;
+      for (const [re, fn] of CAPS) if (re.test(text)) fn(T());
+    };
+    // besondere Momente einzelner Cutscenes (t = Tick der Szene)
+    api.scene = (id, t, bossIdx) => {
+      if (!ok()) return;
+      const x = T();
+      if (id === 'intro' && t === 150) { [72, 79, 84, 88].forEach((m, i) => bell(x + i * 0.1, mtof(m), 1.5, { vol: 0.05, verb: 0.5 })); crash(x, 0.06); }
+      if (id === 'jakob' && t === 104) { timp(x, 41, 0.5); [36, 43, 48].forEach(m => brass(x, m, 2, { vol: 0.06, verb: 0.4 })); }
+      if (id === 'obst' && t === 92) { hiss(x, { type: 'lowpass', f: 2500, f2: 150, a: 0.002, d: 1.2, vol: 0.5, verb: 0.3 }); tone(x, { f: 70, f2: 30, d: 0.6, vol: 0.35 }); }
+      if (id === 'rally' && t === 44) api.visitor('auto', 1);
+      if (bossIdx === 1 && t >= 26 && t < 92 && (t - 26) % 16 === 0)   // Arno schnarcht
+        vox(x, { f: 75, f2: 65, a: 0.4, h: 0.2, d: 0.4, fa: [400, 900], rough: 0.5, vol: 0.18 });
+    };
+
+    // ---- Musik ----
+    // Ein Taktgeber plant die Noten ein paar Zehntelsekunden im Voraus, Web Audio spielt sie dann genau im Takt.
+    // Ein Stil hat bpm, res (Schritte pro Takt), swing (Verzögerung jedes zweiten Schritts, Anteil eines Schritts),
+    // vol, tone (Tiefpass), vinyl (Plattenknistern), bars (je Takt ein Akkord: b = Basston, v = Akkordgriff (MIDI),
+    // s = Tonleiter der Melodie als Tonklassen 0-11, w = Terz und Quinte über dem Bass), mel (Melodie) und play(c),
+    // das einen Schritt spielt. c = { t, s, bar, ch, nx, sd, e }: Zeit, Schritt, Takt, Akkord, nächster Akkord,
+    // Schrittdauer in s, Energie 0..1.
+    const MU = { mus: true };
+    const I = {
+      ep(t, m, d, v, pan = 0) {      // E-Piano: Sinus mit kurzem FM-Anschlag
+        const f = mtof(m), end = t + d + 0.9, car = O('sine', f, t, end), mg = G(0), e = G(0);
+        mg.gain.setValueAtTime(f * 2.2, t); mg.gain.setTargetAtTime(f * 0.15, t, 0.08);
+        link(O('sine', f, t, end), mg, car.frequency);
+        link(car, e, V(t, d + 0.9, { vol: v, pan, verb: 0.2, mus: true }).done(car));
+        e.gain.setValueAtTime(0, t); e.gain.linearRampToValueAtTime(1, t + 0.004);
+        e.gain.setTargetAtTime(0.45, t + 0.01, 0.35); e.gain.setTargetAtTime(0, t + d, 0.12);
+      },
+      bass(t, m, d, v) {             // gezupfter Bass
+        const f = mtof(m), end = t + d + 0.4, e = G(0), fl = F('lowpass', 900, 0.8);
+        const os = O('triangle', f, t, end);
+        link(os, fl); link(O('sine', f, t, end), G(0.8), fl);
+        link(fl, e, V(t, d + 0.4, { vol: v, mus: true }).done(os));
+        e.gain.setValueAtTime(0, t); e.gain.linearRampToValueAtTime(1, t + 0.008);
+        e.gain.setTargetAtTime(0.55, t + 0.01, 0.12); e.gain.setTargetAtTime(0, t + d * 0.95, 0.05);
+      },
+      bassSaw: (t, m, d, v) => { tone(t, { type: 'sawtooth', f: mtof(m), lp: 700, a: 0.005, h: d * 0.7, d: 0.1, vol: v * 0.6, mus: true });
+        tone(t, { f: mtof(m), a: 0.005, h: d * 0.7, d: 0.1, vol: v * 0.5, mus: true }); },
+      sub: (t, m, d, v) => tone(t, { f: mtof(m), a: 0.05, h: d * 0.8, d: d * 0.3, vol: v, mus: true }),
+      tuba: (t, m, d, v) => { tone(t, { type: 'sawtooth', f: mtof(m), lp: 500, a: 0.02, h: d * 0.5, d: d * 0.4, vol: v * 0.5, mus: true });
+        tone(t, { f: mtof(m), a: 0.02, h: d * 0.5, d: d * 0.4, vol: v * 0.6, mus: true }); },
+      pad(t, ms, d, v, lp = 1200, type = 'sawtooth') {   // Fläche aus verstimmten Oszillatoren
+        const end = t + d + 1.2, e = G(0), fl = F('lowpass', lp, 0.5);
+        let os;
+        ms.forEach(m => { for (const det of [-8, 8]) { os = O(type, mtof(m), t, end); os.detune.value = det + R(-3, 3); os.connect(fl); } });
+        link(fl, e, V(t, d + 1.2, { vol: v / ms.length, verb: 0.35, mus: true }).done(os));
+        env(e.gain, t, Math.min(0.6, d * 0.3), d * 0.6, 1.0);
+      },
+      vib: (t, m, d, v) => { tone(t, { f: mtof(m), a: 0.003, d: d + 0.6, vol: v, verb: 0.3, pan: -0.2, mus: true });
+        tone(t, { f: mtof(m) * 4, a: 0.002, d: 0.15, vol: v * 0.15, pan: -0.2, mus: true }); },
+      glock: (t, m, d, v) => bell(t, mtof(m), Math.max(0.4, d), { vol: v, verb: 0.3, pan: 0.2, mus: true }),
+      lead: (t, m, d, v, type = 'square', lp = 2600) => tone(t, { type, f: mtof(m), a: 0.01, h: d * 0.8, d: 0.12,
+        vib: 5.5, vd: mtof(m) * 0.008, lp, vol: v, verb: 0.2, mus: true }),
+      pluck: (t, m, d, v) => tone(t, { type: 'triangle', f: mtof(m), a: 0.002, d: Math.min(0.3, d), vol: v, pan: 0.25, mus: true }),
+      stac: (t, m, d, v) => tone(t, { type: 'sawtooth', f: mtof(m), lp: 1600, a: 0.005, h: d * 0.3, d: d * 0.4, vol: v, pan: 0.2, mus: true }),
+      gtr(t, ms, d, v) {             // verzerrter Powerchord
+        const end = t + d + 0.2, e = G(0), pre = G(3);
+        let os;
+        ms.forEach(m => { os = O('sawtooth', mtof(m), t, end); os.detune.value = R(-6, 6); os.connect(pre); });
+        link(pre, shaper(), F('lowpass', 2800, 0.8), e, V(t, d + 0.2, { vol: v, mus: true }).done(os));
+        env(e.gain, t, 0.004, d * 0.8, 0.1);
+      },
+      brass: (t, m, d, v) => brass(t, m, d, { vol: v, verb: 0.3, mus: true }),
+      kick: (t, v) => tone(t, { f: 150, f2: 42, glide: 0.12, a: 0.002, d: 0.3, vol: v, mus: true }),
+      snare(t, v) {
+        hiss(t, { f: 1900, q: 0.6, a: 0.001, d: 0.16, vol: v, verb: 0.15, mus: true });
+        tone(t, { type: 'triangle', f: 200, f2: 160, d: 0.07, vol: v * 0.5, mus: true });
+      },
+      hat: (t, v, open) => hiss(t, { type: 'highpass', f: 7500, a: 0.001, d: open ? 0.25 : 0.035, vol: v, pan: 0.25, mus: true }),
+      ride(t, v) {
+        hiss(t, { f: 7800, q: 1.2, a: 0.001, d: 0.35, vol: v, pan: -0.25, mus: true });
+        tone(t, { f: 5400, d: 0.25, vol: v * 0.1, pan: -0.25, mus: true });
+      },
+      brush: (t, v, len) => hiss(t, { f: 3200, f2: 2400, q: 0.5, a: len * 0.6, d: len * 0.5, vol: v, pan: 0.15, mus: true }),
+      rim(t, v) {
+        tone(t, { type: 'triangle', f: 1750, d: 0.035, vol: v, mus: true });
+        hiss(t, { f: 2600, q: 2, a: 0.001, d: 0.02, vol: v * 0.8, mus: true });
+      },
+      tom: (t, m, v) => tone(t, { f: mtof(m) * 1.6, f2: mtof(m), glide: 0.06, d: 0.45, vol: v, verb: 0.2, mus: true }),
+      clap(t, v) { [0, 0.012, 0.024].forEach((dt, i) => hiss(t + dt, { f: 1300, q: 1, a: 0.001, d: i === 2 ? 0.14 : 0.01, vol: v, verb: 0.2, mus: true })); },
+      wood(t, v, f = 1200) { tone(t, { f, d: 0.05, vol: v, mus: true }); tone(t, { f: f * 2.3, d: 0.02, vol: v * 0.4, mus: true }); },
+      shaker: (t, v) => hiss(t, { type: 'highpass', f: 6000, a: 0.015, d: 0.04, vol: v, pan: 0.3, mus: true }),
+      timp: (t, m, v) => timp(t, mtof(m), v, true),
+      crash: (t, v) => crash(t, v, true)
+    };
+    // Walking Bass (Zählzeiten 1 bis 3; die 4 führt chromatisch zum nächsten Akkord) und Comping-Rhythmen [Schritt, Länge]
+    const WALKS = [c => [0, c.w[0], c.w[1]], c => [0, c.w[1], 12], c => [0, 2, c.w[0]], c => [0, c.w[1], c.w[0]], c => [12, c.w[1], c.w[0]]];
+    const COMPS = [[[0, 3]], [[0, 1], [3, 3]], [[1, 2], [5, 2]], [[3, 3], [7, 1]], [[0, 2], [5, 3]], [[2, 2], [6, 2]]];
+    const MIN = [4, 6, 7, 9, 11, 0, 2], MAJ = [0, 2, 4, 5, 7, 9, 11], CMIN = [0, 2, 3, 5, 7, 8, 10];
+    const ch = (b, v, s, w = [4, 7]) => ({ b, v, s, w });
+    const fitBass = m => { while (m > 55) m -= 12; while (m < 33) m += 12; return m; };
+    const mus = { name: null, style: null, next: 0, step: 0, bar: 0, seed: 1, A: null, B: null, lastNote: 0, vinyl: null, tone: 0 };
+
+    const lounge = {
+      bpm: 76, res: 8, swing: 0.36, vol: 0.62, vinyl: 0.5, tone: 3800,
+      bars: [
+        ch(45, [55, 60, 64, 71], [9, 11, 0, 2, 4, 7], [3, 7]),    // Am9
+        ch(38, [54, 60, 64, 69], [2, 4, 6, 9, 11, 0]),            // D9
+        ch(43, [54, 59, 62, 69], [7, 9, 11, 2, 4, 6]),            // Gmaj9
+        ch(48, [52, 59, 62, 67], [0, 2, 4, 7, 9, 11]),            // Cmaj9
+        ch(42, [52, 57, 60, 64], [6, 9, 0, 4, 2], [3, 6]),        // F#m7b5
+        ch(47, [51, 57, 60, 66], [11, 0, 3, 6, 9]),               // B7b9
+        ch(40, [55, 59, 62, 66], [4, 6, 7, 9, 11, 2], [3, 7]),    // Em9
+        ch(40, [56, 62, 67, 71], [4, 8, 11, 2, 7])                // E7#9
+      ],
+      mel: { lo: 67, hi: 86, lens: [1, 1, 2, 2, 3], rest: 0.3, vol: 0.12, on: bar => bar % 16 < 8 || bar % 4 === 3, ins: I.vib },
+      play(c) {
+        const { t, s, ch, nx, sd, e } = c, beat = sd * 2;
+        if (s % 2 === 0) {           // Walking Bass
+          if (s === 0) mus.walk = pick(WALKS)(ch);
+          const m = s === 6 ? nx.b + (Math.random() < 0.5 ? -1 : 1) : ch.b + mus.walk[s / 2];
+          I.bass(t, fitBass(m), beat * 0.9, 0.32);
+        }
+        if (s === 0) mus.comp = pick(COMPS);
+        for (const [cs, cl] of mus.comp) if (cs === s) ch.v.forEach((m, i) => I.ep(t + i * 0.008, m, cl * sd, 0.06, (i - 1.5) * 0.15));
+        if (s % 2 === 0) I.brush(t, 0.07, beat);
+        if ([0, 2, 3, 4, 6, 7].includes(s)) I.ride(t, s % 2 ? 0.03 : 0.045);
+        if (s === 2 || s === 6) I.hat(t, 0.06);
+        if (s === 0 || (s === 4 && Math.random() < 0.5)) I.kick(t, 0.2);
+        if (s === 6 && c.bar % 2 === 1) I.rim(t, 0.05);
+        if (e > 0.25) I.shaker(t, 0.08 * e);
+      }
+    };
+    const STYLES = {
+      lounge,
+      // Story-Szenen: dieselbe Kneipe, etwas flotter und leiser
+      story: { ...lounge, bpm: 92, vol: 0.6, mel: { ...lounge.mel, on: () => true } },
+      boss: {
+        bpm: 150, res: 16, swing: 0, vol: 1.5, tone: 6000,
+        bars: [ch(40, [52, 55, 59, 64], MIN), ch(36, [52, 55, 60, 64], MIN), ch(38, [50, 54, 57, 62], MIN), ch(35, [51, 54, 59, 63], [4, 6, 7, 9, 11, 0, 3]),
+          ch(40, [52, 55, 59, 64], MIN), ch(43, [55, 59, 62, 67], MIN), ch(45, [57, 60, 64, 69], MIN), ch(35, [51, 54, 59, 63], [4, 6, 7, 9, 11, 0, 3])],
+        mel: { lo: 64, hi: 83, lens: [2, 2, 1, 1, 4], rest: 0.15, vol: 0.06, on: bar => bar % 8 >= 4, ins: (t, m, d, v) => I.lead(t, m, d, v, 'sawtooth', 2400) },
+        play(c) {
+          const { t, s, ch, bar, sd, e } = c;
+          if (s % 2 === 0) I.bassSaw(t, ch.b + (s % 4 === 2 ? 12 : 0), sd * 1.6, 0.18);
+          if (bar % 8 < 4) { const ar = [...ch.v, ch.v[1] + 12, ch.v[2] + 12]; I.lead(t, ar[s % ar.length] + 12, sd * 0.7, 0.03, 'square', 3000); }
+          if (s === 0) I.pad(t, ch.v, sd * 16, 0.06, 900);
+          if (s === 0 || s === 8 || (s === 10 && bar % 2)) I.kick(t, 0.3);
+          if (s === 4 || s === 12) I.snare(t, 0.2);
+          if (s % 2 === 0 || e > 0.4) I.hat(t, s % 2 ? 0.03 : 0.05);
+          if (s === 0 && bar % 4 === 0) I.crash(t, 0.08);
+          if (bar % 8 === 7 && s >= 12) I.tom(t, 50 - (s - 12) * 3, 0.2);
+        }
+      },
+      helmut: {   // Marsch für den Bundesrauchkanzler
+        bpm: 112, res: 16, swing: 0, vol: 1.6, tone: 5000,
+        bars: [ch(36, [55, 60, 64], MAJ), ch(41, [57, 60, 65], MAJ), ch(43, [55, 59, 62, 65], MAJ), ch(36, [55, 60, 64], MAJ),
+          ch(45, [57, 60, 64], MAJ), ch(38, [57, 62, 65], MAJ), ch(43, [55, 59, 62, 65], MAJ), ch(36, [55, 60, 64], MAJ)],
+        mel: { lo: 65, hi: 84, lens: [4, 4, 2, 2, 6, 8], rest: 0.1, vol: 0.06, on: () => true,
+          ins: (t, m, d, v) => { I.brass(t, m, d, v); I.glock(t, m + 12, d, v * 0.4); } },
+        play(c) {
+          const { t, s, ch, bar, sd } = c;
+          if (s === 0) I.tuba(t, ch.b, sd * 3, 0.3);
+          if (s === 8) I.tuba(t, ch.b + 7 > 50 ? ch.b - 5 : ch.b + 7, sd * 3, 0.28);
+          if (s === 4 || s === 12) ch.v.forEach(m => I.brass(t, m, sd * 1.5, 0.025));
+          if (s === 0 || s === 8) I.kick(t, 0.22);
+          if (s === 4 || s === 12) I.snare(t, 0.12);
+          if (bar % 4 === 3 && s >= 8) I.snare(t, 0.04 + (s - 8) * 0.01);
+          if (s === 0 && bar % 4 === 0) I.crash(t, 0.06);
+        }
+      },
+      epic: {
+        bpm: 72, res: 16, swing: 0, vol: 0.7, tone: 5000,
+        bars: [ch(36, [55, 60, 63, 67], CMIN), ch(32, [56, 60, 63, 68], CMIN), ch(39, [55, 58, 63, 67], CMIN), ch(34, [53, 58, 62, 65], CMIN)],
+        mel: { lo: 60, hi: 79, lens: [8, 8, 4, 12, 6], rest: 0.15, vol: 0.05, on: bar => bar % 8 >= 4, ins: I.brass },
+        play(c) {
+          const { t, s, ch, bar, sd, e } = c;
+          if (s === 0) { I.pad(t, ch.v, sd * 16, 0.1, 1400); I.sub(t, ch.b, sd * 16, 0.25); }
+          if (s % 2 === 0) I.stac(t, [ch.b + 24, ch.b + 31, ch.b + 36, ch.b + 31][(s / 2) % 4], sd * 1.2, 0.035);
+          if (s === 0) I.timp(t, ch.b + 12, 0.35);
+          if ((s === 10 || s === 12) && bar % 2) I.timp(t, ch.b + 12, 0.18);
+          if (s === 14 && bar % 4 === 3) I.timp(t, ch.b + 19, 0.22);
+          if (s === 0 && bar % 8 === 0) I.crash(t, 0.07);
+          if (e > 0.5 && s % 2 === 0) I.snare(t, 0.04);
+        }
+      },
+      calm: {
+        bpm: 66, res: 8, swing: 0, vol: 1.1, vinyl: 0.35, tone: 3200,
+        bars: [ch(41, [57, 60, 64, 67], MAJ), ch(40, [55, 59, 62, 67], MAJ), ch(38, [53, 57, 60, 64], MAJ), ch(36, [52, 55, 59, 62], MAJ)],
+        mel: { lo: 72, hi: 88, lens: [2, 3, 4, 2], rest: 0.45, vol: 0.05, on: () => true, ins: I.glock },
+        play(c) {
+          const { t, s, ch, sd } = c;
+          if (s === 0) { I.pad(t, ch.v, sd * 8, 0.08, 900, 'triangle'); I.sub(t, ch.b, sd * 8, 0.18); }
+          const ar = [...ch.v, ch.v[1] + 12, ch.v[2] + 12, ch.v[3] + 12, ch.v[2] + 12];
+          I.ep(t, ar[s], sd * 1.5, 0.04, (s - 3.5) * 0.1);
+        }
+      },
+      victory: {
+        bpm: 132, res: 16, swing: 0, vol: 1.6, tone: 7000,
+        bars: [ch(36, [60, 64, 67], MAJ), ch(43, [59, 62, 67], MAJ), ch(45, [60, 64, 69], MAJ), ch(41, [60, 65, 69], MAJ)],
+        mel: { lo: 67, hi: 88, lens: [2, 2, 4, 1, 1], rest: 0.15, vol: 0.05, on: bar => bar > 0, ins: (t, m, d, v) => I.lead(t, m, d, v, 'square', 3500) },
+        play(c) {
+          const { t, s, ch, bar, sd } = c;
+          if (bar === 0) for (const [fs, m, l] of [[0, 67, 2], [3, 67, 1], [4, 67, 2], [6, 72, 10]])
+            if (fs === s) { I.lead(t, m, l * sd, 0.07, 'square', 3500); I.brass(t, m - 12, l * sd, 0.04); }
+          if (s % 2 === 0) I.bassSaw(t, ch.b + (s % 4 ? 12 : 0), sd * 1.5, 0.14);
+          if (s % 4 === 0) I.kick(t, 0.25);
+          if (s === 4 || s === 12) I.clap(t, 0.1);
+          if (s % 4 === 2) I.hat(t, 0.06, true);
+          if (s % 2 === 1) I.pluck(t, ch.v[(s >> 1) % ch.v.length] + 12, sd, 0.04);
+          if (s === 0 && bar % 4 === 0) I.crash(t, 0.06);
+        }
+      },
+      silly: {    // Polka: umpa umpa
+        bpm: 120, res: 8, swing: 0, vol: 1.5, tone: 6000,
+        bars: [ch(36, [55, 60, 64], MAJ), ch(43, [55, 59, 62, 65], MAJ), ch(43, [55, 59, 62, 65], MAJ), ch(36, [55, 60, 64], MAJ),
+          ch(36, [55, 60, 64], MAJ), ch(41, [57, 60, 65], MAJ), ch(43, [55, 59, 62, 65], MAJ), ch(36, [55, 60, 64], MAJ)],
+        mel: { lo: 72, hi: 88, lens: [1, 1, 2, 1, 1, 2, 3], rest: 0.15, vol: 0.06, on: () => true, ins: I.glock },
+        play(c) {
+          const { t, s, ch, sd, e } = c;
+          if (s === 0) I.tuba(t, ch.b, sd * 1.8, 0.3);
+          if (s === 4) I.tuba(t, ch.b + 7 > 50 ? ch.b - 5 : ch.b + 7, sd * 1.8, 0.28);
+          if (s === 2 || s === 6) { ch.v.forEach(m => I.lead(t, m, sd * 0.8, 0.02, 'square', 1800)); I.wood(t, 0.05); }
+          if (s % 2 === 1 && e > 0.3) I.shaker(t, 0.05);
+        }
+      },
+      rally: {
+        bpm: 168, res: 16, swing: 0, vol: 1.5, tone: 7000,
+        bars: [ch(33, [45, 52, 57], [9, 0, 2, 4, 7]), ch(33, [45, 52, 57], [9, 0, 2, 4, 7]), ch(31, [43, 50, 55], [9, 0, 2, 4, 7]), ch(38, [50, 57, 62], [9, 0, 2, 4, 7]),
+          ch(33, [45, 52, 57], [9, 0, 2, 4, 7]), ch(33, [45, 52, 57], [9, 0, 2, 4, 7]), ch(40, [52, 59, 64], [9, 0, 2, 4, 7]), ch(38, [50, 57, 62], [9, 0, 2, 4, 7])],
+        mel: { lo: 64, hi: 84, lens: [1, 1, 2, 2, 3], rest: 0.2, vol: 0.05, on: bar => bar % 8 >= 4, ins: (t, m, d, v) => I.lead(t, m, d, v, 'sawtooth', 3200) },
+        play(c) {
+          const { t, s, ch, bar, sd } = c;
+          if (s % 2 === 0) { I.gtr(t, ch.v, sd * (s % 4 === 0 ? 1.8 : 0.9), 0.05); I.bassSaw(t, ch.b + 12, sd * 1.6, 0.14); }
+          if (s === 0 || s === 8 || s === 10) I.kick(t, 0.3);
+          if (s === 4 || s === 12) I.snare(t, 0.22);
+          if (s % 2 === 0) I.hat(t, 0.05);
+          if (s === 0 && bar % 4 === 0) I.crash(t, 0.08);
+        }
+      }
+    };
+
+    // Melodie: ein zweitaktiges Motiv (Rhythmus + Tonschritte), alle 16 Takte neu, dazwischen wiederholt
+    // (Takt 1-4 Motiv A, 5-6 Motiv B, 7-8 wieder A mit langem Schlusston)
+    function rng(seed) {
+      return () => {
+        seed = seed + 0x6D2B79F5 | 0;
+        let x = Math.imul(seed ^ seed >>> 15, 1 | seed);
+        x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x;
+        return ((x ^ x >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    function makeMotif(r, res, lens, rest) {
+      const ns = [];
+      for (let s = 0; s < 2 * res;) {
+        const len = lens[Math.floor(r() * lens.length)];
+        if (r() > rest) ns.push({ s, len: Math.min(len, 2 * res - s), d: Math.round((r() - 0.5) * 5) });
+        s += len;
+      }
+      return ns;
+    }
+    const nearest = (arr, x) => arr.reduce((bi, v, i) => Math.abs(v - x) < Math.abs(arr[bi] - x) ? i : bi, 0);
+    function melody(st, c) {
+      const ml = st.mel;
+      if (!ml) return;
+      if (!mus.A || (c.bar % 16 === 0 && c.s === 0)) {
+        const r = rng(mus.seed++ * 7919 + 13);
+        mus.A = makeMotif(r, st.res, ml.lens, ml.rest); mus.B = makeMotif(r, st.res, ml.lens, ml.rest);
+      }
+      if (!ml.on(c.bar)) return;
+      const part = Math.floor(c.bar / 2) % 4, mo = part === 2 ? mus.B : mus.A, pos = (c.bar % 2) * st.res + c.s;
+      const n = mo.find(x => x.s === pos);
+      if (!n) return;
+      const sc = [];
+      for (let m = ml.lo; m <= ml.hi; m++) if (c.ch.s.includes(m % 12)) sc.push(m);
+      let i = nearest(sc, mus.lastNote || (ml.lo + ml.hi) / 2) + n.d;
+      if (i < 0) i = -i;
+      if (i >= sc.length) i = Math.max(0, 2 * (sc.length - 1) - i);
+      let m = sc[i];
+      if (c.s % (st.res / 2) === 0) {   // auf betonten Zählzeiten ein Akkordton
+        const ct = sc.filter(x => c.ch.v.some(v => (v - x) % 12 === 0));
+        if (ct.length) m = ct[nearest(ct, m)];
+      }
+      mus.lastNote = m;
+      const lastOne = part === 3 && n === mo[mo.length - 1];
+      ml.ins(c.t, m, n.len * c.sd * (lastOne ? 2 : 0.9), ml.vol);
+    }
+
+    function startStyle(name) {
+      const t = ac.currentTime;
+      if (musIn) {
+        const old = musIn, v = mus.vinyl;
+        old.gain.cancelScheduledValues(t); old.gain.setTargetAtTime(0, t, 0.25);
+        setTimeout(() => { try { old.disconnect(); if (v) v.stop(); } catch (e) {} }, 2500);
+      }
+      mus.name = name; mus.style = STYLES[name] || null; mus.vinyl = null;
+      musIn = G(0); musIn.connect(musTone);
+      const st = mus.style;
+      if (!st) return;
+      musIn.gain.setTargetAtTime(st.vol, t, 0.08);
+      Object.assign(mus, { bar: 0, step: 0, next: t + 0.1, A: null, lastNote: 0, comp: COMPS[0], walk: [0, 7, 12], tone: 0 });
+      if (st.vinyl) {
+        const s = ac.createBufferSource(); s.buffer = vinylBuf; s.loop = true; s.start(t);
+        link(s, F('highpass', 400), G(st.vinyl), musIn); mus.vinyl = s;
+      }
+    }
+    let modeFn = () => 'lounge';
+    function musicTick() {
+      if (!live()) return;
+      const name = opt.music ? (modeFn() || '') : '';
+      if (name !== mus.name) startStyle(name);
+      const st = mus.style;
+      if (!st) return;
+      const now = ac.currentTime, sd = 60 / st.bpm * 4 / st.res;
+      // Klangfarbe: je mehr los ist, desto offener
+      const tn = st.tone * (1 + 1.5 * api.energy);
+      if (Math.abs(tn - mus.tone) > 150) { musTone.frequency.setTargetAtTime(tn, now, 0.3); mus.tone = tn; }
+      if (mus.next < now - 0.2) mus.next = now + 0.05;   // hing hinterher (Tab im Hintergrund): neu ansetzen
+      while (mus.next < now + api.ahead) {
+        const bars = st.bars, c = { t: mus.next + (mus.step % 2 ? st.swing * sd : 0), s: mus.step, bar: mus.bar,
+          ch: bars[mus.bar % bars.length], nx: bars[(mus.bar + 1) % bars.length], sd, e: api.energy };
+        try { st.play(c); melody(st, c); } catch (e) { console.error('Musik:', e); }
+        mus.next += sd;
+        if (++mus.step >= st.res) { mus.step = 0; mus.bar++; }
+      }
+    }
+
+    // ---- Start & Einstellungen ----
+    function build() {
+      try { ac = new AC(); } catch (e) { ac = null; return; }
+      const sr = ac.sampleRate, comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 5; comp.attack.value = 0.003; comp.release.value = 0.25;
+      out = G(vol2(opt.vol)); link(out, comp, ac.destination);
+      sfxBus = G(opt.sfx ? 1 : 0); sfxBus.connect(out);
+      musBus = G(opt.music ? MUS_VOL : 0); musBus.connect(out);
+      musTone = F('lowpass', 7000, 0.5); musTone.connect(musBus);
+      // Hall: Impulsantwort aus abklingendem Rauschen, links und rechts verschieden
+      const len = Math.floor(sr * 2.4), ir = ac.createBuffer(2, len, sr);
+      for (let c = 0; c < 2; c++) {
+        const d = ir.getChannelData(c);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3) * Math.min(1, i / (sr * 0.01));
+      }
+      const conv = ac.createConvolver(); conv.buffer = ir; conv.connect(out);
+      sfxVerb = G(opt.sfx ? 0.6 : 0); sfxVerb.connect(conv);
+      musVerb = G(opt.music ? 0.6 * MUS_VOL : 0); musVerb.connect(conv);
+      noiseBuf = ac.createBuffer(1, sr * 2, sr);
+      const nd = noiseBuf.getChannelData(0);
+      for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+      // Plattenknistern: leises Rauschen und vereinzelte Knackser
+      vinylBuf = ac.createBuffer(1, sr * 4, sr);
+      const vd = vinylBuf.getChannelData(0);
+      let lp = 0;
+      for (let i = 0; i < vd.length; i++) { lp += 0.06 * ((Math.random() * 2 - 1) - lp); vd[i] = lp * 0.25; }
+      for (let k = 0; k < 40; k++) {
+        const p = Math.floor(Math.random() * (vd.length - 100)), a = R(0.2, 0.9) * (Math.random() < 0.5 ? -1 : 1);
+        for (let i = 0; i < 60; i++) vd[p + i] += a * Math.exp(-i / 8) * R(0.4, 1);
+      }
+      setInterval(musicTick, 40);
+    }
+    function fireUnlock() {
+      if (unlocked || !live()) return;
+      unlocked = true;
+      unlockCbs.forEach(f => f());
+    }
+    function unlock() {
+      if (!AC) return;
+      if (unlocked) { if (ac.state === 'suspended') ac.resume().catch(() => {}); return; }
+      if (!ac) build();
+      if (!ac) return;
+      gestureAt = performance.now();
+      if (ac.state === 'running') fireUnlock(); else ac.resume().then(fireUnlock, () => {});
+    }
+    for (const ev of ['pointerdown', 'keydown', 'touchend', 'click']) window.addEventListener(ev, unlock, true);
+
+    api.unlock = unlock;
+    api.locked = () => !live();
+    api.onUnlock = f => { if (unlocked) f(); else unlockCbs.push(f); };
+    // true, wenn der laufende Klick den Ton gerade erst eingeschaltet hat (nur einmal)
+    api.justUnlocked = () => {
+      const r = live() && performance.now() - gestureAt < 1500;
+      gestureAt = -1e9;
+      return r;
+    };
+    api.mode = f => { modeFn = f; };
+    api.get = k => opt[k];
+    api.set = (k, v) => {
+      opt[k] = v; store();
+      if (!ac) return;
+      const t = ac.currentTime;
+      if (k === 'vol') out.gain.setTargetAtTime(vol2(v), t, 0.03);
+      if (k === 'sfx') { sfxBus.gain.setTargetAtTime(v ? 1 : 0, t, 0.03); sfxVerb.gain.setTargetAtTime(v ? 0.6 : 0, t, 0.03); }
+      if (k === 'music') {
+        musBus.gain.cancelScheduledValues(t); musBus.gain.setTargetAtTime(v ? MUS_VOL : 0, t, 0.05);
+        musVerb.gain.setTargetAtTime(v ? 0.6 * MUS_VOL : 0, t, 0.05);
+      }
+    };
+    return api;
+  })();
+
+  // Ton-Leiste: Musik und Sounds an/aus, Lautstärke
+  {
+    const musBtn = document.getElementById('tonmusik'), sfxBtn = document.getElementById('tonsfx');
+    const volEl = document.getElementById('tonvol'), hintEl = document.getElementById('tonhint');
+    const show = () => {
+      musBtn.textContent = `♪ Musik: ${snd.get('music') ? 'an' : 'aus'}`;
+      sfxBtn.textContent = `Sounds: ${snd.get('sfx') ? 'an' : 'aus'}`;
+      for (const [b, k] of [[musBtn, 'music'], [sfxBtn, 'sfx']]) {
+        b.className = snd.get(k) ? 'active' : '';
+        b.setAttribute('aria-pressed', snd.get(k));
+        b.style.setProperty('--c', '#ffd24a');
+      }
+    };
+    musBtn.addEventListener('click', () => { snd.set('music', !snd.get('music')); show(); });
+    sfxBtn.addEventListener('click', () => { snd.set('sfx', !snd.get('sfx')); show(); snd.ui('select'); });
+    volEl.value = Math.round(snd.get('vol') * 100);
+    volEl.addEventListener('input', () => snd.set('vol', volEl.value / 100));
+    volEl.addEventListener('change', () => snd.ui('tick'));
+    snd.onUnlock(() => { hintEl.hidden = true; });
+    show();
+  }
 
   // ---- Marken -------------------------------------------------------------
   const BRANDS = [
@@ -798,16 +1925,20 @@
     if (un) {
       char = un;
       setStatus(`★ Freigespielt: ${un.name}! ★`, 3000);
+      snd.fanfare('char');
       renderChars(); save();
       if (un.id === 'jakob') startCutscene('jakob');
     }
-    if (prev < BUFF_NEED && smoked >= BUFF_NEED)
+    if (prev < BUFF_NEED && smoked >= BUFF_NEED) {
       setStatus('★ Passiver Buff freigeschaltet: Bürgergeld! Merz schaut jetzt vorbei. ★', 4000);
+      snd.fanfare('buff');
+    }
     const nb = PERM_BUFFS.filter(b => b.need > prev && b.need <= smoked).pop();
-    if (nb) setStatus(`★ Buff freigeschaltet: ${nb.name}! ${nb.text}. ★`, 4000);
+    if (nb) { setStatus(`★ Buff freigeschaltet: ${nb.name}! ${nb.text}. ★`, 4000); snd.fanfare('buff'); }
     const ub = BRANDS.filter(b => b.need > prev && b.need <= smoked).pop();
     if (ub) {
       setStatus(ub.legend ? `★★★ LEGENDÄR: ${ub.name}! ★★★` : `★ Neue Sorte: ${ub.name}! ★`, 3000);
+      snd.fanfare(ub.legend ? 'legend' : 'brand');
       renderBrands();
     }
   }
@@ -827,6 +1958,7 @@
     }
     phase = 'light';
     t = 0;
+    snd.light(pipe ? 'pipe' : brand.lighter, 12 * snd.stepSec);
     renderPack();
   }
 
@@ -854,6 +1986,7 @@
           pendingBrand = b === brand ? null : b;
           if (pendingBrand) setStatus(`Nächste Kippe: ${b.name}`, 1500);
         }
+        snd.ui('pack');
         renderBrands(); renderPack(); draw();
       });
       brandsEl.appendChild(btn);
@@ -878,6 +2011,7 @@
         char = c;
         save();
         setStatus(`${c.name} ist dran.`, 1500);
+        snd.ui('select');
         renderChars(); draw();
       });
       charsEl.appendChild(btn);
@@ -1082,6 +2216,7 @@
       if (!spots.length) return;   // Berg gerade nicht im Bild: später noch einmal versuchen
       shiny = { ...spots[Math.floor(Math.random() * spots.length)], life: SHINY_TICKS };
       setStatus('Im Kippenberg glitzert etwas ...', 2500);
+      snd.sparkle();
       return;
     }
     const { x, y } = shinyPos();
@@ -1105,6 +2240,7 @@
       * Math.pow(1 + saiyan, SHINY_SAIYAN_EXP) * buffMult('shiny'));
     addKippen(bonus);
     setStatus(`★ Shiny-Kippe! +${fmt(bonus)} Kippen ★`, 2500);
+    snd.shiny();
     save();
     renderHud();
   }
@@ -1128,6 +2264,7 @@
     const bonus = DROP_BONUS * Math.pow(2, prestige);    // jedes Prestige verdoppelt
     addKippen(bonus);
     setStatus(`👽 Alien-Kippe! +${fmt(bonus)} Kippen`, 2000);
+    snd.alien();
     save();
     renderHud();
   }
@@ -1176,6 +2313,7 @@
     const bonus = hit.bonus * Math.pow(2, prestige) * buffMult('visitor');
     addKippen(bonus);
     setStatus(`${hit.name} erwischt! +${fmt(bonus)} Kippen` + (prestige ? ` (x${fmt(Math.pow(2, prestige))} Prestige)` : ''), 2000);
+    snd.coin(hit.bonus >= 5000);
     save();
     renderHud();
   }
@@ -1215,6 +2353,7 @@
 
   function doExhale() {
     const mx = CIG_X + 1, my = MOUTH_ROW - 0.5;
+    snd.exFx(brand.exhale, t, exhaleDur() * snd.stepSec);
     switch (brand.exhale) {
       case 'frost':
         for (let i = 0; i < 3; i++) spawn(mx, my + rnd(-0.3, 0.3), rnd(1.3, 2.4), rnd(-0.25, 0.05), rnd(30, 55));
@@ -1297,6 +2436,8 @@
     }
   }
 
+  const exhaleDur = () => brand.exDur || (brand.exhale === 'cloud' ? 14 : brand.exhale === 'frost' ? 12 : 10);
+
   function step() {
     tick++; t++;
     ox = 0;
@@ -1314,32 +2455,40 @@
         break;
       case 'rest':
         setStatus('...');
-        if (t > brand.rest) { phase = 'drag'; t = 0; }
+        if (t > brand.rest) {
+          phase = 'drag'; t = 0;
+          // tiefer Zug, so lang wie die Zugphase gerade dauert
+          snd.inhale((brand.drag + 1) * snd.stepSec);
+        }
         break;
       case 'drag':
         setStatus(pipe ? '*pafft genüsslich*' : brand.say.drag);
         if (t > brand.drag) { cigLen--; phase = 'hold'; t = 0; }
         break;
       case 'hold':
-        if (t > 4) { phase = 'exhale'; t = 0; }
+        if (t > 4) {
+          phase = 'exhale'; t = 0;
+          if (brand.exhale !== 'rings') snd.exhale((exhaleDur() + 4) * snd.stepSec, snd.EXHALE[brand.exhale]);
+        }
         break;
       case 'exhale': {
         setStatus(brand.say.exhale);
         doExhale();
-        const dur = brand.exDur || (brand.exhale === 'cloud' ? 14 : brand.exhale === 'frost' ? 12 : 10);
-        if (t > dur) {
+        if (t > exhaleDur()) {
           const firstDrag = !pipe && cigLen === brand.len - 1;
           phase = (brand.exhale === 'cough' && firstDrag) ? 'cough' : cigLen <= 0 ? 'done' : 'rest';
           t = 0;
+          if (phase === 'done') snd.stubOut();
         }
         break;
       }
       case 'cough':
         setStatus('*hust* *hust* ... stark.');
+        if (t === 1 || t === 5 || t === 9) snd.cough();
         ox = t % 2;
         if (t % 3 === 0)
           for (let i = 0; i < 5; i++) spawn(CIG_X + 1, MOUTH_ROW - 0.5, rnd(0.8, 1.8), rnd(-0.6, 0.2), rnd(15, 30));
-        if (t > 12) { phase = cigLen <= 0 ? 'done' : 'rest'; t = 0; }
+        if (t > 12) { phase = cigLen <= 0 ? 'done' : 'rest'; t = 0; if (phase === 'done') snd.stubOut(); }
         break;
       case 'done':
         setStatus(pipe ? 'Pfeife ausgeklopft.' : 'Aufgeraucht.');
@@ -1348,6 +2497,7 @@
           if (pendingBrand) { brand = pendingBrand; pendingBrand = null; }
           setStatus(counts[brand.id] > 0 ? 'Noch eine?' : 'Schachtel leer.');
           addKippen(perCig() * yieldMult);
+          snd.flick(); snd.plink();
           throwButt(CIG_X + ox, MOUTH_ROW);
           save();
           renderBrands(); renderPack();
@@ -1358,9 +2508,10 @@
     for (const p of particles) {
       if (p.kind === 'butt') {
         p.x += p.vx; p.y += p.vy; p.vy += 0.1;
-        if (p.life <= 1 && pileCount < cellsFor(smoked)) addPileCell(p.col);
+        if (p.life <= 1) { snd.land(); if (pileCount < cellsFor(smoked)) addPileCell(p.col); }
       } else if (p.kind === 'rocket') {
         p.x += p.vx; p.y += p.vy;
+        if (p.life <= 1) snd.boom();
         if (p.life <= 1)   // Rakete zerplatzt
           for (let k = 0; k < 14; k++) {
             const ang = k / 14 * Math.PI * 2, v = rnd(0.7, 1);
@@ -1370,6 +2521,7 @@
       } else if (p.kind === 'ring' || p.kind === 'skull' || p.kind === 'ghost' || p.kind === 'lion') {
         p.x += p.vx; p.y += p.vy; p.vx *= 0.975;
         // beim Brüllen laufen Schallwellen nach links und rechts weg (nach links nur kurz, sonst landen sie im Gesicht)
+        if (p.kind === 'lion' && lionRoars(p) && !p.roared) { p.roared = true; snd.roar(); }
         if (p.kind === 'lion' && lionRoars(p) && p.life % 3 === 0)
           for (const d of [-1, 1])
             for (const dy of [-1, 0, 1])
@@ -1697,6 +2849,7 @@
     if (counts[brand.id] === 0) {
       counts[brand.id] = FULL_PACK;
       setStatus('Neue Schachtel aufgemacht.');
+      snd.newPack();
       renderPack();
       return;
     }
@@ -1739,7 +2892,7 @@
   turboEl.addEventListener('keydown', e => { if (e.repeat) e.preventDefault(); });
 
   turboEl.addEventListener('click', () => {
-    if (phase === 'idle') startCig(); else clicks.push(performance.now());
+    if (phase === 'idle') startCig(); else { clicks.push(performance.now()); snd.turbo(Math.min(MAX_CPS, clicks.length)); }
   });
 
   function currentSpeed() {
@@ -1795,7 +2948,7 @@
       btn.textContent = m === 'max' ? 'Max' : `x${m}`;
       btn.style.setProperty('--c', '#ffd24a');
       btn.className = m === bulk ? 'active' : '';
-      btn.addEventListener('click', () => { bulk = m; save(); renderBulk(); renderHud(); });
+      btn.addEventListener('click', () => { bulk = m; snd.ui('tick'); save(); renderBulk(); renderHud(); });
       bulkEl.appendChild(btn);
     }
   }
@@ -1815,6 +2968,7 @@
       owned[u.id] += n;
       save();
       setStatus(n > 1 ? `Gekauft: ${n}x ${u.name}` : `Gekauft: ${u.name}`, 1500);
+      snd.buy(n);
       renderHud();
     });
     shopEl.appendChild(btn);
@@ -1841,6 +2995,7 @@
       buffTimes[b.id] = { until: now + b.secs * 1000, ready: now + (b.secs + b.cool) * 1000 };
       save();
       setStatus(`Buff gekauft: ${b.name} (${b.secs} s)`, 2500);
+      snd.buff();
       renderHud();
     });
     document.getElementById('tempbuffs').appendChild(btn);
@@ -1936,7 +3091,7 @@
   const storyFolderEl = document.getElementById('storyfolder');
   storyFolderEl.open = foldersOpen.stories;
   storyFolderEl.addEventListener('toggle', () => {
-    if (foldersOpen.stories !== storyFolderEl.open) { foldersOpen.stories = storyFolderEl.open; save(); }
+    if (foldersOpen.stories !== storyFolderEl.open) { foldersOpen.stories = storyFolderEl.open; snd.ui('fold'); save(); }
   });
 
   function renderStories() {
@@ -1962,6 +3117,7 @@
     const won = STORY_TITLES.find(([n]) => n === stories);
     setStatus(won ? `★★★ ${stories} Storys! Neuer Titel: „${won[1]}“ ★★★`
       : `Neue Kippen-Story: ${STORIES[stories - 1].t}`, 4000);
+    if (won) snd.fanfare('legend'); else snd.story();
     storyFolderEl.open = true;   // die neue Story soll man gleich lesen können
     showStory(stories - 1);
     renderHud(); draw();
@@ -2013,6 +3169,7 @@
     saiyan++;
     save();
     setStatus(`*KAAAAAH!* SUPER-SAIYAJIN Stufe ${saiyan}!`, 4000);
+    if (saiyan !== 1) snd.saiyan();   // Stufe 1 schreit in der Cutscene
     renderHair(); renderHud(); draw();
     if (saiyan === 1) startCutscene('ssj1');
     if (saiyan === 100) startCutscene('ssj100');
@@ -2030,6 +3187,7 @@
     for (const u of UPGRADES) owned[u.id] = 0;
     save();
     setStatus(`★ PRESTIGE ${prestige}! Ein neuer Zigaretten-Stern. ★`, 4000);
+    snd.prestige();
     renderHud(); draw();
     startCutscene('prestige');
   });
@@ -2193,6 +3351,7 @@
     packEl.hidden = true; bossEl.hidden = false;
     setStatus(gift ? `${b.name} schaut vorbei! ${HELMUT.time} s lang gibt jeder Klick Kippen!`
       : `BOSSKAMPF: ${b.name}! Klick ihn weg!`, 3000);
+    snd.boss(gift ? 'gift' : 'start');
     renderBoss();
   }
 
@@ -2233,6 +3392,7 @@
     endBoss();
     addKippen(reward);
     setStatus(`★ ${b.name} besiegt! +${fmt(reward)} Kippen ★`, 4000);
+    snd.boss('win');
     const beaten = 'boss' + ((bossWins - 1) % BOSSES.length);
     if (!seenScenes.includes(beaten)) startCutscene(beaten);
     save();
@@ -2241,11 +3401,16 @@
   }
 
   const bossWarnEl = document.getElementById('bosswarn');
+  let bossBeep = 0;              // zuletzt angepiepte Sekunde der Boss-Warnung
   function bossTick() {
     const now = performance.now();
     // Vorwarnung: die letzten Sekunden herunterzählen
     const due = nextBossAt - now, warn = !boss && due > 0 && due <= BOSS_WARN;
-    if (warn) setText(bossWarnEl, `! BOSS IN ${Math.ceil(due / 1000)} s !`);
+    if (warn) {
+      const sec = Math.ceil(due / 1000);
+      if (sec !== bossBeep) { bossBeep = sec; snd.boss('warn', sec); }
+      setText(bossWarnEl, `! BOSS IN ${sec} s !`);
+    }
     bossWarnEl.classList.toggle('on', warn);
     if (!boss) {
       if (now >= nextBossAt) startBoss(now);
@@ -2257,6 +3422,7 @@
     if (!boss.gift && damageBoss(income() * dt)) return;
     if (now >= boss.end) {
       if (boss.gift) save();
+      snd.boss(boss.gift ? 'giftEnd' : 'flee');
       if (boss.gift && !seenScenes.includes('helmut')) startCutscene('helmut');
       setStatus(boss.gift ? `${boss.b.name} zieht weiter. Insgesamt +${fmt(boss.earned)} Kippen.` :`${boss.b.name} ist entkommen! Kein Bonus, dein Einkommen läuft normal weiter.`, 3500);
       endBoss();
@@ -2273,9 +3439,11 @@
       const bonus = giftClick();
       boss.earned += bonus;
       addKippen(bonus);
+      snd.coin();
       renderBoss(); renderHud();
       return;
     }
+    snd.boss('hit');
     if (!damageBoss(bossClick())) renderBoss();
   });
 
@@ -2313,11 +3481,13 @@
       return;
     }
     doc.t++;
+    if (doc.state !== 'shake' && doc.t % 4 === 0) snd.footstep();
     if (doc.state === 'in') {
       doc.x -= 1.5;
       if (doc.x <= DOC_STOP) {
         doc.state = 'shake'; doc.t = 0;
         setStatus('Der Arzt schüttelt den Kopf. *tz tz tz*', 3500);
+        snd.tsk();
       }
     } else if (doc.state === 'shake') {
       if (doc.t > 38) { doc.state = 'out'; doc.t = 0; }
@@ -2338,6 +3508,7 @@
       const w = Math.max(...v.frames[0].map(l => l.length));
       visitor = { v, w, t: 0, x: v.dir < 0 ? W : -w, y: v.sky ? Math.floor(rnd(6, 13)) : H - 1 };
       setStatus(v.say, 2500);
+      snd.visitor(v.id, v.dir);
       return;
     }
     const s = visitor, v = s.v;
@@ -2350,7 +3521,9 @@
       if (v.rearFrames && !s.reared && Math.abs(s.x + s.w / 2 - W / 2) < v.speed) {
         s.reared = true; s.rear = 28;
         setStatus('*WIEHER!* Das Pferd bäumt sich auf.', 2500);
+        snd.whinny();
       }
+      if (v.rearFrames && s.t % 4 === 0) snd.hooves();
     }
     if (v.smoke && s.t % 3 === 0) {
       const sx = s.x + v.smoke[0];
@@ -2360,7 +3533,7 @@
     // das UFO wirft alle paar Sekunden eine Kippe ab
     if (v.drop && s.t % 30 === 15) {
       const dx = s.x + s.w / 2;
-      if (dx > 3 && dx < W - 3) drops.push({ x: dx, y: s.y + 1, life: DROP_REST });
+      if (dx > 3 && dx < W - 3) { drops.push({ x: dx, y: s.y + 1, life: DROP_REST }); snd.ufoDrop(); }
     }
     // nächster Besuch in ~30 bis 90 s
     if (v.dir < 0 ? s.x < -s.w : s.x >= W) { visitor = null; nextVisitor = loopTick + Math.floor(rnd(350, 1000)); }
@@ -2373,6 +3546,7 @@
       lastPuke = performance.now();
       pukeT = PUKE_TICKS;
       setStatus('*würg* ... *KOTZ*', PUKE_TICKS * TICK);
+      snd.puke();
     }
     pukeT--;
     ox = pukeT > 0 && pukeT % 4 < 2 ? 1 : 0;
@@ -2386,11 +3560,14 @@
     if (!owned.slot) { spinning = false; return; }
     const ph = loopTick % SLOT_EVERY;
     spinning = ph >= SLOT_EVERY - 8;
+    if (spinning) snd.slot('tick');
     if (ph !== 0) return;
     reels = reels.map(() => SLOT_SYMS[Math.floor(Math.random() * 4)]);
     const [a, b, c] = reels;
-    const triple = a === b && b === c;
-    const win = owned.slot * (triple ? (a === '7' ? 7777 : 2000) : (a === b || b === c || a === c) ? 175 : 0);
+    const triple = a === b && b === c, pair = a === b || b === c || a === c;
+    const win = owned.slot * (triple ? (a === '7' ? 7777 : 2000) : pair ? 175 : 0);
+    snd.slot('stop');
+    if (triple) snd.slot(a === '7' ? 'jackpot' : 'triple'); else if (pair) snd.slot('pair');
     addKippen(win);
     if (triple) setStatus(`${a === '7' ? 'JACKPOT' : 'Drilling'} ${reels.join('')}! +${fmt(win)} Kippen`, 2500);
   }
@@ -2972,6 +4149,7 @@
   ];
   const introEl = document.getElementById('intro');
   const introSceneEl = document.getElementById('introscene');
+  const introSkipEl = document.getElementById('introskip');
   let cut = null;                // { scene, t, smoke: [], t0 }, solange eine Cutscene läuft
   let cutQueue = [];             // IDs, die warten, weil gerade schon eine Cutscene läuft
 
@@ -3713,7 +4891,14 @@
 
   function cutTick() {
     const t = ++cut.t, sm = cut.smoke, scene = cut.scene, smoky = scene.id === 'intro';
-    if (scene.lightAt === t) introEl.classList.add('light');
+    if (scene.lightAt === t) { introEl.classList.add('light'); snd.lightUp(); }
+    // Ton: Geräusche zu den Untertiteln, Schreibmaschine beim Tippen, besondere Momente
+    for (const [a, , s] of scene.captions) {
+      if (t === a) snd.caption(s);
+      if (t >= a && (t - a) * 2 < s.length) snd.type();
+    }
+    snd.scene(scene.id, t, scene.boss);
+    introSkipEl.textContent = snd.locked() ? '[ Klick: mit Ton von vorn · Esc: überspringen ]' : '[ Klick · Leertaste · Esc: überspringen ]';
     // dünner Faden von der Glut, ab dem Ausatmen eine Wolke von unten (aus dem eigenen Mund)
     if (smoky && t >= 104 && t < 150 && t % 2 === 0)
       sm.push({ x: 40, y: 12, vx: rnd(-0.15, 0.15), vy: rnd(-0.4, -0.25), life: 30, max: 30, cs: '.:o~' });
@@ -3868,7 +5053,11 @@
     save();
     if (cutQueue.length) startCutscene(cutQueue.shift());
   }
-  introEl.addEventListener('click', endCutscene);
+  // Der erste Klick schaltet den Ton ein (Browser erlauben ihn erst dann): die Cutscene läuft dann mit Ton von vorn
+  introEl.addEventListener('click', () => {
+    if (cut && snd.justUnlocked()) { cut.t = 0; cut.smoke = []; introEl.classList.remove('light'); return; }
+    endCutscene();
+  });
   document.addEventListener('keydown', e => {
     if (!cut || !['Escape', 'Enter', ' '].includes(e.key)) return;
     e.preventDefault();
@@ -3896,7 +5085,7 @@
   const sceneFolderEl = document.getElementById('scenefolder');
   sceneFolderEl.open = foldersOpen.scenes;
   sceneFolderEl.addEventListener('toggle', () => {
-    if (foldersOpen.scenes !== sceneFolderEl.open) { foldersOpen.scenes = sceneFolderEl.open; save(); }
+    if (foldersOpen.scenes !== sceneFolderEl.open) { foldersOpen.scenes = sceneFolderEl.open; snd.ui('fold'); save(); }
   });
   function renderScenes() {
     sceneListEl.innerHTML = '';
@@ -3934,6 +5123,7 @@
       setStatus(gag.g.say, gag.g.ticks * TICK);
     }
     const k = gag.t++, id = gag.g.id;
+    snd.gag(id, k);
     if (id === 'wink' && k === 14) spawn(14, BASE + 2, 0.4, -0.3, 8, 'spark', { color: HOT, front: true });
     if (id === 'beer') {
       // die Flasche fliegt im Bogen nach rechts und zerspringt am Boden
@@ -3962,6 +5152,12 @@
     const speed = currentSpeed();
     const vis = Math.min(speed, MAX_STEPS);
     yieldMult = speed / vis;
+    // Ton: beim Nachholen stumm; Schrittdauer fürs Timing der Atemzüge; Energie für die Musik
+    // (schnelles Klicken, Boss mit wenig Leben)
+    snd.quiet = !render;
+    snd.stepSec = TICK / 1000 / vis;
+    snd.energy = Math.max(Math.min(1, clicks.length / 12), boss && !boss.gift ? 1 - Math.max(0, boss.hp / boss.max) : 0);
+    if (brand.fire && render) snd.fireAmb();
     pukeTick();
     if (pukeT > 0) {
       // Figur ist beschäftigt: nur die Partikel laufen weiter
@@ -4002,7 +5198,7 @@
   let lastTickAt = performance.now();
   setInterval(() => {
     const now = performance.now();
-    if (cut) { cutTick(); lastTickAt = now; return; }   // während der Cutscene steht das Spiel still
+    if (cut) { snd.quiet = false; cutTick(); lastTickAt = now; return; }   // während der Cutscene steht das Spiel still
     const due = Math.floor((now - lastTickAt) / TICK);
     if (due < 1) return;
     const n = Math.min(due, CATCH_UP);
@@ -4013,6 +5209,11 @@
     for (let i = 1; i < n && !cut; i++) gameTick(false);   // eine Cutscene, die dabei ausgelöst wird, hält sofort an
     if (!cut) gameTick(true);
   }, TICK);
+  // Musik: Cutscenes haben ihre eigene, Bosskämpfe auch, sonst läuft die Raucherpausen-Lounge
+  const SCENE_MUSIC = { intro: 'calm', prestige: 'calm', eins: 'calm', jakob: 'epic', berg: 'epic', ssj1: 'epic', ssj100: 'epic',
+    helmut: 'helmut', obst: 'silly', rally: 'rally' };
+  snd.mode(() => cut ? SCENE_MUSIC[cut.scene.id] || (cut.scene.boss !== undefined ? 'victory' : 'story')
+    : boss ? (boss.gift ? 'helmut' : 'boss') : 'lounge');
   syncPile();
   renderScenes();                // erst jetzt steht die Berggröße fest (Cutscene "Der Gipfel")
   renderSpeed(1);
