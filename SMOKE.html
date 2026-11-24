@@ -28,8 +28,8 @@
   #chars { margin-bottom: 20px; }
   #ton { margin: -6px 0 14px; align-items: center; }
   #ton button { font-size: 0.75rem; padding: 3px 10px; }
-  #ton label { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 0.75rem; }
-  #ton input { accent-color: #ffd24a; width: 110px; }
+  #ton input { accent-color: #ffd24a; width: 90px; }
+  #ton input:disabled { opacity: 0.35; }
   #tonhint { color: var(--dim); font-size: 0.75rem; font-style: italic; }
   #tonhint[hidden] { display: none; }
   #reset { margin-top: 24px; font: inherit; font-size: 0.75rem; background: none; border: 0; color: var(--dim); cursor: pointer; text-decoration: underline; }
@@ -217,8 +217,9 @@
   <p class="sub">Rauchen, Kippen sammeln, Upgrades kaufen. Garantiert teer- und nikotinfrei.</p>
   <div id="ton" class="picker" role="group" aria-label="Ton">
     <button id="tonmusik" type="button"></button>
+    <input id="tonmusvol" type="range" min="0" max="100" step="1" aria-label="Lautstärke Musik">
     <button id="tonsfx" type="button"></button>
-    <label>Lautstärke <input id="tonvol" type="range" min="0" max="100" step="1"></label>
+    <input id="tonsfxvol" type="range" min="0" max="100" step="1" aria-label="Lautstärke Sounds">
     <span id="tonhint">Ton startet mit dem ersten Klick</span>
   </div>
 
@@ -290,11 +291,14 @@
   const snd = (() => {
     const AC = window.AudioContext || window.webkitAudioContext;
     const KEY = 'ascii-raucherpause-ton', MUS_VOL = 0.32;
-    const opt = { sfx: true, music: true, vol: 0.7 };
+    // musVol / sfxVol: Lautstärke von Musik und Sounds (0..1), unabhängig voneinander
+    const opt = { sfx: true, music: true, musVol: 0.7, sfxVol: 0.7 };
     try {
       const o = JSON.parse(localStorage.getItem(KEY) || '{}');
+      const isVol = v => typeof v === 'number' && v >= 0 && v <= 1;
       for (const k of ['sfx', 'music']) if (typeof o[k] === 'boolean') opt[k] = o[k];
-      if (typeof o.vol === 'number' && o.vol >= 0 && o.vol <= 1) opt.vol = o.vol;
+      if (isVol(o.vol)) opt.musVol = opt.sfxVol = o.vol;   // alte gemeinsame Lautstärke übernehmen
+      for (const k of ['musVol', 'sfxVol']) if (isVol(o[k])) opt[k] = o[k];
     } catch (e) {}
     const store = () => { try { localStorage.setItem(KEY, JSON.stringify(opt)); } catch (e) {} };
 
@@ -429,10 +433,13 @@
       hiss(t, { type: 'lowpass', f: 400, a: 0.002, d: 0.12, vol: vol * 0.5, mus });
     }
     const crash = (t, vol, mus = false) => hiss(t, { type: 'highpass', f: 3800, a: 0.002, d: 1.8, vol, mus, verb: 0.3 });
+    // Pegel der beiden Busse aus An/Aus und Lautstärke
+    const sfxLevel = () => opt.sfx ? vol2(opt.sfxVol) : 0;
+    const musLevel = () => opt.music ? MUS_VOL * vol2(opt.musVol) : 0;
     function duck(t, len) {
       if (!opt.music) return;
-      const p = musBus.gain;
-      p.cancelScheduledValues(t); p.setTargetAtTime(MUS_VOL * 0.35, t, 0.04); p.setTargetAtTime(MUS_VOL, t + len, 0.4);
+      const p = musBus.gain, l = musLevel();
+      p.cancelScheduledValues(t); p.setTargetAtTime(l * 0.35, t, 0.04); p.setTargetAtTime(l, t + len, 0.4);
     }
 
     // ---- Rauchen ----
@@ -1495,9 +1502,9 @@
       try { ac = new AC(); } catch (e) { ac = null; return; }
       const sr = ac.sampleRate, comp = ac.createDynamicsCompressor();
       comp.threshold.value = -14; comp.knee.value = 10; comp.ratio.value = 5; comp.attack.value = 0.003; comp.release.value = 0.25;
-      out = G(vol2(opt.vol)); link(out, comp, ac.destination);
-      sfxBus = G(opt.sfx ? 1 : 0); sfxBus.connect(out);
-      musBus = G(opt.music ? MUS_VOL : 0); musBus.connect(out);
+      out = G(1); link(out, comp, ac.destination);
+      sfxBus = G(sfxLevel()); sfxBus.connect(out);
+      musBus = G(musLevel()); musBus.connect(out);
       musTone = F('lowpass', 7000, 0.5); musTone.connect(musBus);
       // Hall: Impulsantwort aus abklingendem Rauschen, links und rechts verschieden
       const len = Math.floor(sr * 2.4), ir = ac.createBuffer(2, len, sr);
@@ -1506,8 +1513,8 @@
         for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3) * Math.min(1, i / (sr * 0.01));
       }
       const conv = ac.createConvolver(); conv.buffer = ir; conv.connect(out);
-      sfxVerb = G(opt.sfx ? 0.6 : 0); sfxVerb.connect(conv);
-      musVerb = G(opt.music ? 0.6 * MUS_VOL : 0); musVerb.connect(conv);
+      sfxVerb = G(0.6 * sfxLevel()); sfxVerb.connect(conv);
+      musVerb = G(0.6 * musLevel()); musVerb.connect(conv);
       noiseBuf = ac.createBuffer(1, sr * 2, sr);
       const nd = noiseBuf.getChannelData(0);
       for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
@@ -1553,11 +1560,12 @@
       opt[k] = v; store();
       if (!ac) return;
       const t = ac.currentTime;
-      if (k === 'vol') out.gain.setTargetAtTime(vol2(v), t, 0.03);
-      if (k === 'sfx') { sfxBus.gain.setTargetAtTime(v ? 1 : 0, t, 0.03); sfxVerb.gain.setTargetAtTime(v ? 0.6 : 0, t, 0.03); }
-      if (k === 'music') {
-        musBus.gain.cancelScheduledValues(t); musBus.gain.setTargetAtTime(v ? MUS_VOL : 0, t, 0.05);
-        musVerb.gain.setTargetAtTime(v ? 0.6 * MUS_VOL : 0, t, 0.05);
+      if (k === 'sfx' || k === 'sfxVol') {
+        sfxBus.gain.setTargetAtTime(sfxLevel(), t, 0.03); sfxVerb.gain.setTargetAtTime(0.6 * sfxLevel(), t, 0.03);
+      }
+      if (k === 'music' || k === 'musVol') {
+        musBus.gain.cancelScheduledValues(t); musBus.gain.setTargetAtTime(musLevel(), t, 0.05);
+        musVerb.gain.setTargetAtTime(0.6 * musLevel(), t, 0.05);
       }
     };
     return api;
@@ -1566,7 +1574,8 @@
   // Ton-Leiste: Musik und Sounds an/aus, Lautstärke
   {
     const musBtn = document.getElementById('tonmusik'), sfxBtn = document.getElementById('tonsfx');
-    const volEl = document.getElementById('tonvol'), hintEl = document.getElementById('tonhint');
+    const musVolEl = document.getElementById('tonmusvol'), sfxVolEl = document.getElementById('tonsfxvol');
+    const hintEl = document.getElementById('tonhint');
     const show = () => {
       musBtn.textContent = `♪ Musik: ${snd.get('music') ? 'an' : 'aus'}`;
       sfxBtn.textContent = `Sounds: ${snd.get('sfx') ? 'an' : 'aus'}`;
@@ -1575,12 +1584,15 @@
         b.setAttribute('aria-pressed', snd.get(k));
         b.style.setProperty('--c', '#ffd24a');
       }
+      musVolEl.disabled = !snd.get('music'); sfxVolEl.disabled = !snd.get('sfx');
     };
     musBtn.addEventListener('click', () => { snd.set('music', !snd.get('music')); show(); });
     sfxBtn.addEventListener('click', () => { snd.set('sfx', !snd.get('sfx')); show(); snd.ui('select'); });
-    volEl.value = Math.round(snd.get('vol') * 100);
-    volEl.addEventListener('input', () => snd.set('vol', volEl.value / 100));
-    volEl.addEventListener('change', () => snd.ui('tick'));
+    for (const [el, k] of [[musVolEl, 'musVol'], [sfxVolEl, 'sfxVol']]) {
+      el.value = Math.round(snd.get(k) * 100);
+      el.addEventListener('input', () => snd.set(k, el.value / 100));
+    }
+    sfxVolEl.addEventListener('change', () => snd.ui('tick'));   // Probeklang in der neuen Lautstärke
     snd.onUnlock(() => { hintEl.hidden = true; });
     show();
   }
